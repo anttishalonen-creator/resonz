@@ -1,0 +1,1694 @@
+﻿Resonz v1 implementation-ready product + engineering spec
+Document purpose
+This document is intended to be handed directly to a coding agent or developer as the primary source of truth for building Resonz v1.
+It defines: - product scope - frozen v1 decisions - UI structure - interaction rules - state model - audio-engine behavior - watch-sync behavior - persistence - module structure - acceptance criteria
+This spec favors clarity, minimalism, and ship-ability over overengineering.
+________________
+
+
+1. Product summary
+1.1 Product name
+Resonz
+1.2 Product concept
+Resonz is a minimalist Android app for guided binaural-beat sessions.
+The app has: - four intent presets - one main frequency control - three fine-tuning controls - optional watch-based adaptive guidance
+The feel should be: - clean - modern - clinical - calm - trustworthy
+It must not feel like: - a mystical chakra app - a marketplace of tracks - a DJ tool - a medical device
+1.3 Primary user promise
+User can: 1. tap a preset 2. see the controls animate into place 3. fine-tune the session 4. press Play 5. get a smooth, high-quality session
+________________
+
+
+2. Frozen v1 decisions
+These are considered fixed unless explicitly changed.
+2.1 Main control hierarchy
+* Beat is the hero slider and the most visually prominent control.
+* Drift, Time, and Tone are grouped underneath as a fine-tuning cluster.
+* Watch Sync is a separate toggle row under the fine-tuning cluster.
+2.2 Presets
+The main screen contains exactly four preset buttons: - Deep Sleep - Drift to Sleep - Focus - Earth Sync
+2.3 Preset behavior
+Pressing a preset button: - visually activates the button - animates all sliders/toggle targets into place - updates the audio engine targets smoothly - does not auto-start playback
+2.4 Audio implementation direction
+v1 should use real-time synthesis, not a pre-rendered-track-only architecture.
+Reason: - preset animation must map to real parameter change - Beat must be live and meaningful - Drift must evolve in-session - Tone must change sound character in real time - Watch Sync must gently influence session progression
+2.5 Design direction
+Use the same broad visual family as Cognisenz: - white / very light gray background - dark navy active elements - pale blue-gray inactive controls - minimal typography - generous whitespace - subtle borders / shadows only
+________________
+
+
+3. Scope
+3.1 In scope for v1
+* Android phone app
+* main session screen with preset buttons + controls
+* playback screen
+* real-time stereo binaural engine
+* local persistence of last used configuration
+* optional Wear OS watch sync prototype
+* smooth preset animations
+* smooth audio parameter interpolation
+3.2 Optional in v1 if time permits
+* advanced screen with numeric values and more technical controls
+* session history list
+* saved favorite configurations
+* headphone detection warning
+* foreground playback notification
+3.3 Out of scope for v1
+* cloud sync
+* user accounts
+* marketplace of tracks
+* social features
+* subscription logic
+* medical claims
+* sleep-stage detection
+* HRV-based clinical logic
+* direct BPM-to-beat mapping
+* hundreds of audio backgrounds
+________________
+
+
+4. Core UX model
+4.1 User mental model
+Resonz is a preset-first system with live manual refinement.
+The user understands the app as: - choose a mode - adjust one big frequency slider - tweak three smaller controls - optionally allow watch guidance - play
+4.2 Control roles
+Beat
+Main target binaural beat frequency.
+Drift
+How much the beat travels or evolves over the session.
+Time
+Session duration. Also affects how fast Drift unfolds.
+Tone
+How warm / bright the sound character feels.
+Watch Sync
+Allows the app to adapt the session path using heart-rate trend.
+4.3 Important principle
+The app should feel like: - a calm instrument - not a spreadsheet of settings
+Therefore: - show few controls - hide technical complexity behind simple labels - keep the default state beautiful and usable
+________________
+
+
+5. Primary screen architecture
+v1 should include these screens: 1. Splash 2. Main / Setup 3. Playback 4. Advanced (optional but recommended stub) 5. Settings (minimal)
+________________
+
+
+6. Visual system
+6.1 Color palette
+Use this baseline palette.
+* bgPrimary = #F5F5F3
+* bgCard = #FFFFFF
+* navyPrimary = #233463
+* navySecondary = #31457A
+* tileInactive = #DCE3EC
+* textPrimary = #1F2740
+* textSecondary = #6C7386
+* lineSoft = #C8CED8
+* successSoft = #4B9B6E (only if needed, use sparingly)
+* warningSoft = #9B8651 (only if needed, use sparingly)
+No saturated neon colors.
+6.2 Typography
+Use a clean sans serif.
+Suggested default sizes: - App wordmark: 40sp - Page title: 28sp - Hero numeric value: 28sp - Section label: 16sp, medium / semibold - Secondary label: 12–14sp - Button label: 16sp, medium
+6.3 Shape system
+* Buttons: rounded rectangles, 8dp radius
+* Slider thumb hero: circular, 28dp
+* Slider thumb secondary: circular, 22dp
+* Cards: subtle corner radius 8–12dp
+* Shadow: soft and minimal
+6.4 Spacing system
+* Outer page padding horizontal: 24dp
+* Outer page padding top: 20dp
+* Vertical section spacing: 20–28dp
+* Slider label to rail gap: 10dp
+* Preset grid gaps: 12dp
+6.5 Design tokens for direct implementation
+These values are intended to be copied into code as constants.
+Color tokens
+object ResonzColors {
+    val BgPrimary = Color(0xFFF5F5F3)
+    val BgCard = Color(0xFFFFFFFF)
+    val NavyPrimary = Color(0xFF233463)
+    val NavyPressed = Color(0xFF1C2A52)
+    val NavySecondary = Color(0xFF31457A)
+    val TileInactive = Color(0xFFDCE3EC)
+    val TileInactivePressed = Color(0xFFD3DAE4)
+    val TextPrimary = Color(0xFF1F2740)
+    val TextSecondary = Color(0xFF6C7386)
+    val TextOnNavy = Color(0xFFFFFFFF)
+    val LineSoft = Color(0xFFC8CED8)
+    val SliderTrackInactive = Color(0xFFE2E6ED)
+    val SliderTrackActive = Color(0xFF5B76B8)
+    val SliderThumb = Color(0xFF233463)
+    val ToggleOn = Color(0xFF5DBB8A)
+    val ToggleOff = Color(0xFFB8C1D0)
+    val ErrorSoft = Color(0xFFB85C5C)
+    val WarmAccent = Color(0xFFD8BF8A)
+}
+Typography tokens
+object ResonzType {
+    val Wordmark = 40.sp
+    val ScreenTitle = 28.sp
+    val HeroValue = 28.sp
+    val HeroUnit = 16.sp
+    val SectionLabel = 16.sp
+    val ButtonLabel = 16.sp
+    val SecondaryLabel = 13.sp
+    val SmallLabel = 12.sp
+    val StatusText = 12.sp
+}
+Shape tokens
+object ResonzShapes {
+    val CardRadius = 10.dp
+    val ButtonRadius = 8.dp
+    val SliderThumbHeroRadius = 14.dp   // 28dp diameter
+    val SliderThumbFineRadius = 11.dp   // 22dp diameter
+    val ToggleRadius = 14.dp
+    val IconBadgeRadius = 12.dp
+}
+Spacing tokens
+object ResonzSpacing {
+    val ScreenHorizontal = 24.dp
+    val TopPadding = 20.dp
+    val LogoTopGap = 8.dp
+    val SectionGapLarge = 28.dp
+    val SectionGapMedium = 20.dp
+    val SectionGapSmall = 12.dp
+    val ControlClusterGap = 16.dp
+    val LabelToValueGap = 8.dp
+    val LabelToSliderGap = 10.dp
+    val SliderToCaptionsGap = 10.dp
+    val BottomButtonsTopGap = 24.dp
+    val GridGap = 12.dp
+}
+Border and elevation tokens
+object ResonzStroke {
+    val Hairline = 1.dp
+    val ControlBorder = 1.dp
+}
+
+object ResonzElevation {
+    val Card = 1.dp
+    val ActiveButton = 2.dp
+    val SliderThumb = 3.dp
+}
+6.6 Screen size assumptions for v1
+Primary layout target: - portrait phone - width class around 360dp - height around 800dp usable space
+Layout must scale, but the base design should be tuned for a common phone portrait size.
+6.7 Button sizing spec
+Preset buttons
+* width: fill half row
+* height: 56dp
+* corner radius: 8dp
+* internal horizontal padding: 12dp
+* internal vertical padding: 0dp because fixed-height button
+* border:
+   * inactive: 1dp lineSoft at 25–35% alpha or no border if tile is visually distinct enough
+   * active: no visible border required
+Bottom action buttons
+* width: fill half row
+* height: 58dp
+* corner radius: 8dp
+* Play uses navy fill
+* Advanced uses tileInactive fill
+* border for Advanced: 1dp lineSoft at 35% alpha
+Settings / secondary list items if added later
+* min height: 52dp
+* corner radius: 8dp
+6.8 Preset button state colors
+Inactive
+* background: TileInactive
+* text: TextPrimary
+* border: LineSoft at 20% alpha
+Pressed inactive
+* background: TileInactivePressed
+* text: TextPrimary
+Active
+* background: NavyPrimary
+* text: TextOnNavy
+* shadow/elevation: 2dp
+Active pressed
+* background: NavyPressed
+* text: TextOnNavy
+6.9 Slider component sizing spec
+Hero Beat slider
+* rail height: 8dp
+* rail corner radius: 4dp
+* thumb diameter: 28dp
+* active rail color: SliderTrackActive
+* inactive rail color: SliderTrackInactive
+* thumb fill: SliderThumb
+* thumb shadow: soft, 3dp
+* total touch height: at least 44dp
+Fine-tuning sliders
+Applies to Drift, Time, Tone. - rail height: 6dp - rail corner radius: 3dp - thumb diameter: 22dp - active rail color: SliderTrackActive - inactive rail color: SliderTrackInactive - thumb fill: - Drift/Time: SliderThumb - Tone: optional white fill with navy ring and warm accent center if desired, but plain navy is acceptable for implementation simplicity
+Slider section spacing
+For every slider section: - top label row height target: 32dp - label row to slider: 10dp - slider to caption row: 10dp
+6.10 Toggle sizing spec
+Watch Sync toggle
+* total switch width: 52dp
+* total switch height: 32dp
+* knob diameter: 28dp
+* on background: ToggleOn
+* off background: ToggleOff
+* knob color: white
+* border: none or 1dp lineSoft at 20% alpha for off state
+6.11 Icon sizing spec
+* logo mark on main screen: 56dp square target box
+* watch icon near Watch Sync: 20dp
+* optional headphones icon in playback header: 18dp
+* moon/sun accent icons for labels: 18dp
+* help icon circle if used: 44dp touch target, 20dp visible glyph
+6.12 Text color rules
+* page labels: TextPrimary
+* supporting text: TextSecondary
+* active button text: TextOnNavy
+* disabled text: TextSecondary at 65% alpha
+* error text: ErrorSoft
+6.13 Main screen exact layout measurements
+These are recommended Compose layout targets for a 360dp wide screen.
+Overall page
+* root background: BgPrimary
+* horizontal padding: 24dp
+* top padding: 20dp
+* bottom padding: 24dp
+Logo block
+* top margin from screen top: 12dp
+* logo box: 56dp
+* gap logo -> wordmark: 6dp
+* wordmark bottom gap -> preset grid: 24dp
+Preset grid
+* two columns
+* gap between columns: 12dp
+* gap between rows: 12dp
+* each button height: 56dp
+* bottom gap preset grid -> Beat section: 28dp
+Beat section
+* label row height: 32dp
+* beat value right aligned
+* gap label row -> slider: 10dp
+* hero slider touch region height: 44dp
+* gap slider -> zone captions: 10dp
+* gap captions -> fine-tuning cluster: 24dp
+Fine-tuning cluster
+For each of Drift, Time, Tone: - row label/value height: 28dp - row -> slider gap: 8dp - slider height region: 36dp - slider -> captions or next section gap: 14dp
+* gap between Drift and Time sections: 16dp
+* gap between Time and Tone sections: 16dp
+* gap Tone -> Watch Sync row: 20dp
+Watch Sync row
+* row min height: 40dp
+* gap Watch Sync row -> buttons: 24dp
+Bottom buttons row
+* two columns
+* gap between buttons: 12dp
+* button height: 58dp
+6.14 Recommended component widths
+Assuming 24dp horizontal padding and 12dp gap: - available width = 360 - 24 - 24 = 312dp - each half-width button in two-column layout = (312 - 12) / 2 = 150dp
+Target dimensions on 360dp layout: - preset button width: 150dp - bottom button width: 150dp - slider full width: 312dp
+These can be responsive, but the visual rhythm should stay close to this.
+6.15 Divider rules
+Use dividers sparingly.
+If needed: - thickness: 1dp - color: LineSoft at 40% alpha - inset: full width of content column
+6.16 Shadow rules
+Keep shadows minimal.
+Recommended shadow use: - active preset button: low, soft shadow - slider thumb: very subtle shadow - no large floating-card shadows
+6.17 Compose implementation notes for agent
+Recommended approach: - define all colors, spacing, radii, and text sizes in a dedicated design-token file - never scatter raw hex codes or dp values through feature code - use preview composables for: - main screen idle - each active preset - modified state - watch sync on/off - playback state
+6.18 Example design-token file structure
+// ui/theme/ResonzDesignTokens.kt
+object ResonzDimens { ... }
+object ResonzColors { ... }
+object ResonzType { ... }
+object ResonzShapes { ... }
+6.19 Example preset button spec for agent
+@Composable
+fun PresetButton(
+    title: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+)
+Visual rules: - height fixed 56.dp - shape RoundedCornerShape(8.dp) - background depends on active state - text centered, all caps or title caps based on final styling choice - font size 16.sp - font weight Medium
+6.20 Example hero slider container spec
+@Composable
+fun HeroBeatSection(
+    beatHz: Double,
+    normalizedValue: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+)
+Visual rules: - section title/value row - custom slider or heavily styled slider - 28dp thumb diameter - 8dp active rail - captions row below
+________________
+
+
+7. Branding
+7.1 Logo direction
+Top of screen uses a navy R mark on white / very light background.
+Design intent: - visually related to the Cognisenz mark - simple geometric shape - not detailed - must read clearly at small size
+7.2 Wordmark
+Text under or near logo: Resonz
+Subtitle optional on splash only: Sleep • Focus • Ground
+________________
+
+
+8. Main screen detailed spec
+8.1 Purpose
+Main screen is where the user configures the session.
+8.2 Layout order
+From top to bottom: 1. logo mark 2. wordmark 3. preset button grid 4. hero Beat slider section 5. grouped fine-tuning section 6. Watch Sync row 7. bottom action buttons
+8.3 Preset button grid
+Use a 2x2 grid.
+Row 1: - Deep Sleep - Drift to Sleep
+Row 2: - Focus - Earth Sync
+Preset button style
+Inactive: - pale tile background - dark navy text - subtle border / no heavy shadow
+Active: - filled navy - white text - subtle active elevation
+Preset button dimensions
+* height: 56dp
+* full width in each half-column
+* corner radius: 8dp
+Preset button interaction
+Tap behavior: - animate active-state visuals - animate all control values to preset targets over 350ms - update audio targets with smoothing - if playback already active, update sound live without stopping session
+Long press behavior: none in v1.
+8.4 Hero Beat section
+Structure
+Row 1: - left label: BEAT - right live value: e.g. 8.0 Hz
+Row 2: - large slider rail
+Row 3: - zone labels below rail: DEEP, DRIFT, CALM, FOCUS
+Beat slider requirements
+* most prominent control on the page
+* larger thumb than other sliders
+* slider should feel smooth and premium
+Beat value formatting
+* one decimal place when >= 1.0
+* two decimals when < 1.0
+* examples:
+   * 3.0 Hz
+   * 7.8 Hz
+   * 0.75 Hz
+Beat slider scale
+Use a non-linear mapping so low frequencies are easier to control.
+Recommended mapping: - UI position p in [0,1] - beatHz = exponential interpolation between min and max
+Recommended bounds: - min: 0.5 Hz - max: 40.0 Hz
+Reason: A linear scale would waste too much travel on the high end and make the low end too cramped.
+Zone labels for user guidance
+These are visual guidance only, not hard mode locks: - DEEP = 0.5–4.0 Hz - DRIFT = 4.0–8.0 Hz - CALM = 8.0–12.0 Hz - FOCUS = 12.0–40.0 Hz
+8.5 Fine-tuning cluster
+Under the Beat section, place the three fine-tuning controls visually closer together.
+Order: 1. Drift 2. Time 3. Tone
+These should be grouped more tightly than the Beat section.
+________________
+
+
+9. Fine-tuning controls spec
+9.1 Drift control
+Purpose
+Controls how much the beat evolves over the session.
+UI representation
+Row 1: - left label: DRIFT - right live value text: Off, Low, Medium, or High
+Row 2: - slider rail with 4 snap positions
+Allowed values
+Discrete positions only: - 0 = Off - 1 = Low - 2 = Medium - 3 = High
+Internal normalized value
+Also expose normalized float for engine: - Off = 0.00 - Low = 0.33 - Medium = 0.66 - High = 1.00
+UX notes
+* snapping should feel intentional, not wobbly
+* when preset changes, slider thumb animates to target position
+9.2 Time control
+Purpose
+Defines session duration and indirectly affects drift rate.
+UI representation
+Time should appear as a slider-like control with snap points.
+Row 1: - left label: TIME - right live value text: e.g. 45 Min, 90 Min, All Night
+Row 2: - slider rail with snap points
+Allowed values for v1
+Discrete positions: - 20 Min - 30 Min - 45 Min - 90 Min - All Night
+Internal values
+* 20m = 1200 sec
+* 30m = 1800 sec
+* 45m = 2700 sec
+* 90m = 5400 sec
+* All Night = 28800 sec (8 hours default internal target)
+UX note
+Although user suggested a slider, the implementation should be a snapped slider / segmented rail hybrid so it still feels precise.
+9.3 Tone control
+Purpose
+Controls sound character, not the binaural beat itself.
+UI representation
+Row 1: - left label: TONE - right live value text: Warm, Neutral, or Bright
+Row 2: - continuous slider from Warm to Bright
+Row 3: - small labels under rail: WARM on left, BRIGHT on right
+Allowed user range
+Continuous 0.0–1.0
+UI live label mapping
+* 0.00–0.33 => Warm
+* 0.34–0.66 => Neutral
+* 0.67–1.00 => Bright
+Internal meaning
+Tone changes: - carrier center frequency - harmonic mix - filtering / brightness of sound - optional body-layer strength
+Tone does not change: - beat frequency - duration - preset identity
+________________
+
+
+10. Watch Sync row
+10.1 Purpose
+Allow optional adaptive guidance from a paired Wear OS watch.
+10.2 UI layout
+One horizontal row: - left text: Watch Sync - optional watch icon - toggle switch - small status text on right or below
+Toggle states
+Off: - switch gray / inactive - status text hidden or muted: Off
+On but not connected: - show status Waiting for watch
+On and connected: - show status Following heart-rate trend
+On but unsupported for current preset: - show status Not active for this mode
+10.3 v1 rule for Focus preset
+To keep v1 manageable, Watch Sync should be: - fully supported for Deep Sleep - fully supported for Drift to Sleep - optionally supported for Earth Sync - disabled for Focus in v1
+When Focus is selected and Watch Sync is toggled on: - show disabled-state helper text - do not use heart-rate adaptation for that session
+________________
+
+
+11. Bottom action buttons
+11.1 Buttons
+Two large buttons at bottom: - PLAY - ADVANCED
+11.2 Style
+* Play: filled navy, white text
+* Advanced: pale tile, navy text
+11.3 Behavior
+Play
+* if no session active, starts session using current configuration
+* opens Playback screen
+Advanced
+* opens Advanced screen
+* can be a stub in earliest build if needed
+________________
+
+
+12. Playback screen spec
+12.1 Purpose
+Playback screen shows active session and limited live controls.
+12.2 Layout
+Top row: - back arrow left - elapsed / total time centered - optional headphones / watch icon right
+Middle: - active preset name - current beat value smaller underneath - large pause / play button
+Lower section: - compact Beat control access - compact Drift / Tone access if needed - stop or end session action
+12.3 Minimal v1 playback approach
+Keep playback screen simpler than setup screen.
+Recommended v1 layout: - time progress at top - preset name - beat value - central Pause button - bottom buttons: - BEAT - MORE
+BEAT can open a bottom sheet with Beat slider. MORE can open a bottom sheet with Drift / Time / Tone / Watch Sync.
+Alternative v1 approach if faster to build: - reuse the Main screen and simply place it in active playback state - Play button becomes Pause / Stop region
+________________
+
+
+13. Advanced screen spec
+13.1 Purpose
+Advanced is for power users and future-proofing.
+13.2 v1 Advanced items
+Recommended fields: - exact Beat numeric entry - carrier center display - session debug info - smoothing speed display - experimental switches hidden behind collapsible section
+13.3 Can be partial in v1
+If implementation time is tight, Advanced may start as a placeholder screen with: - title - current config readout - note that more tuning will arrive later
+________________
+
+
+14. Preset definitions
+These preset values are the default targets when the preset button is pressed.
+14.1 Deep Sleep preset
+* presetId = DEEP_SLEEP
+* Beat: 3.0 Hz
+* Drift: Low
+* Time: 90 Min
+* Tone: Warm
+* Watch Sync default: Off
+* Profile type: DESCEND_SOFT
+Behavioral intent
+Stable low-frequency sleep support with very little movement.
+14.2 Drift to Sleep preset
+* presetId = DRIFT_TO_SLEEP
+* Beat: 8.0 Hz
+* Drift: Medium
+* Time: 45 Min
+* Tone: Warm
+* Watch Sync default: Off
+* Profile type: DESCEND_ACTIVE
+Behavioral intent
+Session begins lighter and drifts deeper through the chosen duration.
+14.3 Focus preset
+* presetId = FOCUS
+* Beat: 40.0 Hz
+* Drift: Off
+* Time: 30 Min
+* Tone: NeutralBright
+* Watch Sync default: Off
+* Profile type: STABLE_FOCUS
+Behavioral intent
+Stable alert session with little or no movement.
+14.4 Earth Sync preset
+* presetId = EARTH_SYNC
+* Beat: 7.8 Hz
+* Drift: Low
+* Time: 30 Min
+* Tone: Warm
+* Watch Sync default: Off
+* Profile type: GENTLE_AROUND_ANCHOR
+Behavioral intent
+Grounded / gentle relaxation vibe.
+Messaging rule
+Do not hard-claim scientific entrainment based on Earth resonance. It is a vibe / label choice, not a medical or scientific promise.
+________________
+
+
+15. What happens when a preset is selected
+15.1 UI logic
+When preset button P is tapped: 1. store selectedPreset = P 2. store isModified = false 3. animate visible controls to preset target values 4. if playback active, call audio-engine target update 5. if playback inactive, update preview state only
+15.2 Animation timing
+Recommended: - control animation duration: 350ms - easing: standard ease-in-out - toggle change: 200ms
+15.3 Audio transition timing
+Audio should move more slowly than UI so it feels calm.
+Recommended parameter smoothing: - Beat target smoothing: 500–1200ms - Tone target smoothing: 600–1500ms - preset full transition envelope: 1–3 sec, depending on parameter distance
+________________
+
+
+16. What happens when user tweaks sliders after preset selection
+16.1 Modification rules
+If user changes any control away from preset target by meaningful threshold: - keep the last preset button visually active - set isModified = true - show small helper text under preset grid: Modified
+This is simpler than adding a separate CUSTOM button in v1.
+16.2 Meaningful thresholds
+Use these thresholds to decide whether config counts as modified: - Beat differs by > 0.15 Hz - Drift differs by one snap level - Time differs by one snap level - Tone differs by > 0.08 - Watch Sync differs from preset default
+________________
+
+
+17. Audio-engine product spec
+17.1 Primary requirement
+Audio must feel smooth, pleasant, and non-haunting.
+17.2 Non-goals
+Do not ship raw naked sine tones as the default final sound.
+Even if the engine internally begins from sine-based carriers, the audible result should be softened and pleasant.
+17.3 Core audio layers
+v1 recommended synthesis stack: 1. Binaural carrier layer 2. Body layer for warmth and thickness 3. Very subtle air / noise layer if needed 4. Master output envelope + limiter
+Layer 1: binaural carrier layer
+Produces the actual left/right frequency difference.
+Layer 2: body layer
+Adds warmth and reduces the empty haunted feeling.
+Layer 3: subtle air/noise layer
+Optional low-level smooth noise to soften harshness.
+Layer 4: master stage
+Ensures click-free fades and clipping protection.
+17.4 Audio quality rules
+* no clicks on start / stop
+* no clicks on slider change
+* no abrupt phase reset during normal parameter changes
+* avoid clipping
+* avoid brittle or shrill sound at higher tone values
+* maintain stereo integrity
+* support headphone playback cleanly
+17.5 Output format
+Recommended internal target: - stereo - 48 kHz preferred if supported, otherwise 44.1 kHz fallback - float internally if convenient, PCM16 acceptable at output boundary
+17.6 Session start behavior
+On session start: - initialize engine with current state - fade in over 400–1200ms - do not blast full amplitude instantly
+17.7 Session end behavior
+On stop / end: - fade out over 800–2000ms - stop engine after fade completes
+17.8 Parameter smoothing
+Every user-controlled parameter must be smoothed.
+Parameters requiring smoothing: - beatHz - carrierCenter - toneBrightness - body mix - master gain
+Recommended smoothing type: - one-pole smoothing or ramp interpolation
+________________
+
+
+18. Audio-engine technical behavior
+18.1 Fundamental binaural model
+At any time: - left frequency = carrierCenter - beatHz/2 - right frequency = carrierCenter + beatHz/2
+The brain perceives the difference as the binaural beat.
+18.2 Carrier center selection
+Carrier center is influenced by Tone.
+Suggested mapping: - Warm => lower carrier center - Neutral => mid carrier center - Bright => higher carrier center
+Recommended base range: - warm area: 140–180 Hz - neutral area: 180–240 Hz - bright area: 240–320 Hz
+18.3 Tone mapping suggestion
+toneNormalized in [0,1]
+Map to: - carrier center - harmonic emphasis - filter brightness
+Example conceptual mapping: - 0.0 = warm, lower center, stronger body layer, softer highs - 0.5 = neutral - 1.0 = brighter, higher center, lighter body
+18.4 Body layer suggestion
+Use a subtle, musically pleasant under-layer that follows tone choice.
+Requirements: - never dominate the binaural layer - never sound like an obvious melody in v1 default sound - should mainly add warmth and fullness
+18.5 Optional noise layer suggestion
+Very subtle smooth noise may be used to reduce sterile emptiness.
+Requirements: - shared between channels or carefully managed - must not destroy the binaural effect - keep level low
+________________
+
+
+19. Drift engine behavior
+19.1 Concept
+Beat slider defines the anchor. Drift defines how much movement happens over the session. Time defines how fast that movement unfolds. Preset defines the profile type.
+19.2 Profile types
+Use one of these profile types internally: - STABLE - DESCEND_SOFT - DESCEND_ACTIVE - GENTLE_AROUND_ANCHOR - FOCUS_STABLE
+19.3 Recommended mapping by preset
+* Deep Sleep => DESCEND_SOFT
+* Drift to Sleep => DESCEND_ACTIVE
+* Focus => FOCUS_STABLE
+* Earth Sync => GENTLE_AROUND_ANCHOR
+19.4 Drift behavior by profile
+STABLE
+* keep beat near anchor
+* very small movement only
+DESCEND_SOFT
+* gradually move toward a lower target over time
+* movement mild even at Low drift
+DESCEND_ACTIVE
+* more noticeable downward journey over time
+* higher drift means larger total descent
+GENTLE_AROUND_ANCHOR
+* remain near anchor with tiny movement / breathing feel
+* no major descent unless user sets high drift and long time
+FOCUS_STABLE
+* keep beat effectively fixed
+* optional tiny early-settling ramp only
+19.5 Time + Drift interaction
+This is the key rule.
+* Short Time + High Drift => faster movement
+* Long Time + High Drift => slower broader movement
+* Drift Off => stable regardless of time
+19.6 Recommended v1 descent rule
+For descend-type profiles, compute a target end beat based on: - anchor beat - drift amount - lower floor by mode - time duration
+Suggested simple rule for descend presets
+For Deep Sleep and Drift to Sleep: - start at anchor beat - compute max downward distance based on drift - map time into curve duration - use a smooth monotonic curve, not staircase jumps
+Example conceptual floors: - Deep Sleep floor: 1.5 Hz - Drift to Sleep floor: 2.0 Hz
+Example drift distances
+For Deep Sleep with anchor 3.0: - Off => end 3.0 - Low => end 2.5 - Medium => end 2.0 - High => end 1.5
+For Drift to Sleep with anchor 8.0: - Off => end 8.0 - Low => end 6.0 - Medium => end 4.0 - High => end 2.5
+These are defaults. Agent may refine the curves if sound behavior is smoother.
+19.7 Update cadence
+Engine may recalculate target path continuously or in small intervals.
+User should perceive: - a continuous gentle drift - never discrete stepping
+________________
+
+
+20. Watch Sync behavior spec
+20.1 Product principle
+Watch Sync should guide the session, not directly control it.
+20.2 Explicit rule
+Do not map current heart rate directly to beat frequency.
+Bad example: - HR 72 bpm => 1.2 Hz beat
+Do not do this.
+20.3 Correct behavior
+Use heart-rate trend to decide whether the session should: - hold at a lighter stage longer - descend more quickly - pause descent temporarily - remain stable
+20.4 Watch Sync inputs
+Collect these values from watch side: - timestamp - heartRateBpm - accuracy / confidence if available - source status
+20.5 Phone-side adaptive logic
+Phone should compute: - baseline heart rate from session start window - smoothed current heart rate - trend delta vs baseline
+Recommended baseline window: - first 60–120 sec of session, once enough valid samples exist
+Recommended smoothing: - rolling average or EWMA to suppress jitter
+20.6 Adaptation rules for sleep presets
+For supported sleep presets: - if HR remains above baseline by threshold, hold slightly higher / lighter longer - if HR drops below baseline or clearly trends downward, allow descent - max adjustment per evaluation should remain subtle
+Suggested thresholds
+These are reasonable starting values, not sacred truths: - elevated threshold: +4 bpm versus smoothed baseline - settled threshold: -3 bpm or stronger downward trend
+Suggested evaluation interval
+* every 15–30 sec
+Suggested max beat adjustment from watch influence
+* no more than about 0.2–0.5 Hz per evaluation
+* never enough to create sudden audible jumps
+20.7 Focus-mode rule
+In v1, Focus does not use Watch Sync.
+Reason: - simpler implementation - avoids overpromising - sleep logic is more intuitive for HR trend adaptation
+20.8 Earth Sync rule
+Earth Sync may optionally use a very gentle hold / release adaptation if implemented, otherwise leave disabled in v1.
+20.9 Failure behavior
+If watch disconnects mid-session: - keep current session running normally - freeze Watch Sync adaptation - show muted status Watch disconnected - do not interrupt audio
+________________
+
+
+21. Recommended Android implementation architecture
+21.1 Language and UI stack
+Recommended v1 stack: - Kotlin - Jetpack Compose for UI - MVVM or unidirectional state flow - ViewModel + StateFlow for screen state
+21.2 Audio engine choice
+Recommended pragmatic v1 path: - real-time synthesis using a dedicated audio module - start with a robust streaming implementation that can generate stereo PCM in real time - keep engine abstraction clean so it can later swap implementation if needed
+Recommended abstraction: - UI layer does not know how audio is rendered - UI talks to AudioEngineController
+21.3 Wear support
+Recommended v1 architecture: - phone app main logic - optional Wear OS companion module - watch measures heart rate - phone owns the session logic and audio engine
+21.4 Persistence
+Use local storage for: - last selected preset - last slider values - whether Watch Sync was enabled - whether user has seen headphone warning
+Recommended storage: - DataStore or equivalent modern preference storage
+________________
+
+
+22. Suggested module breakdown
+22.1 App modules
+Suggested structure: - app - core-ui - core-model - core-audio - core-storage - feature-main - feature-playback - feature-advanced - wear-bridge (if watch prototype in same codebase) - wear-app (optional companion app)
+22.2 Core model module contents
+Contains: - enums - data classes - preset definitions - slider state mappings - config serializers
+22.3 Core audio module contents
+Contains: - engine interfaces - synth parameter models - render loop - smoothing utilities - session lifecycle
+22.4 Wear bridge module contents
+Contains: - data contracts - watch-connection state - parsed heart-rate updates - adaptation coordinator
+________________
+
+
+23. Data models
+23.1 Enums
+enum class PresetId {
+    DEEP_SLEEP,
+    DRIFT_TO_SLEEP,
+    FOCUS,
+    EARTH_SYNC
+}
+
+enum class DriftLevel {
+    OFF,
+    LOW,
+    MEDIUM,
+    HIGH
+}
+
+enum class TimePreset {
+    MIN_20,
+    MIN_30,
+    MIN_45,
+    MIN_90,
+    ALL_NIGHT
+}
+
+enum class ToneLabel {
+    WARM,
+    NEUTRAL,
+    BRIGHT
+}
+
+enum class SessionStatus {
+    IDLE,
+    STARTING,
+    PLAYING,
+    PAUSED,
+    STOPPING,
+    ERROR
+}
+
+enum class WatchSyncStatus {
+    OFF,
+    WAITING,
+    CONNECTED,
+    ACTIVE,
+    DISCONNECTED,
+    UNSUPPORTED_FOR_PRESET
+}
+23.2 SessionConfig
+data class SessionConfig(
+    val presetId: PresetId,
+    val beatHz: Double,
+    val driftLevel: DriftLevel,
+    val timePreset: TimePreset,
+    val toneNormalized: Float,
+    val watchSyncEnabled: Boolean,
+    val isModified: Boolean
+)
+23.3 AudioTargets
+data class AudioTargets(
+    val beatHz: Double,
+    val carrierCenterHz: Double,
+    val bodyMix: Float,
+    val brightness: Float,
+    val masterGain: Float,
+    val profileType: ProfileType,
+    val driftAmount: Float,
+    val sessionDurationSec: Int
+)
+23.4 Watch update model
+data class WatchHeartRateSample(
+    val timestampMs: Long,
+    val bpm: Float,
+    val confidence: Float?
+)
+23.5 UI state model
+data class MainUiState(
+    val config: SessionConfig,
+    val sessionStatus: SessionStatus,
+    val watchSyncStatus: WatchSyncStatus,
+    val currentElapsedSec: Int,
+    val currentTotalSec: Int,
+    val activeBeatDisplayHz: Double,
+    val statusMessage: String?
+)
+________________
+
+
+24. Preset factory definitions
+Create a single source of truth for preset defaults.
+object PresetDefaults {
+    fun deepSleep() = SessionConfig(
+        presetId = PresetId.DEEP_SLEEP,
+        beatHz = 3.0,
+        driftLevel = DriftLevel.LOW,
+        timePreset = TimePreset.MIN_90,
+        toneNormalized = 0.18f,
+        watchSyncEnabled = false,
+        isModified = false
+    )
+
+    fun driftToSleep() = SessionConfig(
+        presetId = PresetId.DRIFT_TO_SLEEP,
+        beatHz = 8.0,
+        driftLevel = DriftLevel.MEDIUM,
+        timePreset = TimePreset.MIN_45,
+        toneNormalized = 0.22f,
+        watchSyncEnabled = false,
+        isModified = false
+    )
+
+    fun focus() = SessionConfig(
+        presetId = PresetId.FOCUS,
+        beatHz = 40.0,
+        driftLevel = DriftLevel.OFF,
+        timePreset = TimePreset.MIN_30,
+        toneNormalized = 0.62f,
+        watchSyncEnabled = false,
+        isModified = false
+    )
+
+    fun earthSync() = SessionConfig(
+        presetId = PresetId.EARTH_SYNC,
+        beatHz = 7.8,
+        driftLevel = DriftLevel.LOW,
+        timePreset = TimePreset.MIN_30,
+        toneNormalized = 0.20f,
+        watchSyncEnabled = false,
+        isModified = false
+    )
+}
+________________
+
+
+25. ViewModel event model
+Recommended UI actions:
+sealed interface MainAction {
+    data class SelectPreset(val presetId: PresetId) : MainAction
+    data class SetBeatNormalized(val value: Float) : MainAction
+    data class SetDriftLevel(val level: DriftLevel) : MainAction
+    data class SetTimePreset(val preset: TimePreset) : MainAction
+    data class SetToneNormalized(val value: Float) : MainAction
+    data class ToggleWatchSync(val enabled: Boolean) : MainAction
+    data object PlayPause : MainAction
+    data object Stop : MainAction
+    data object OpenAdvanced : MainAction
+    data object LoadInitialState : MainAction
+}
+ViewModel responsibilities: - update MainUiState - derive SessionConfig - persist last config - send smoothed target updates to audio engine - coordinate watch sync availability
+________________
+
+
+26. Audio engine interface suggestion
+interface AudioEngineController {
+    fun prepare(config: SessionConfig)
+    fun start(config: SessionConfig)
+    fun pause()
+    fun resume()
+    fun stop()
+    fun release()
+    fun updateTargets(targets: AudioTargets)
+    fun currentEngineState(): EngineState
+}
+updateTargets() must be safe to call frequently.
+________________
+
+
+27. Mapping functions
+27.1 Beat slider mapping
+Use a normalized UI value to map to non-linear beat range.
+Concept: - min = 0.5 Hz - max = 40 Hz - exponential interpolation
+Need two helpers: - normalizedToBeatHz(value: Float): Double - beatHzToNormalized(hz: Double): Float
+27.2 Tone mapping
+Need helpers: - toneNormalizedToLabel(value: Float): ToneLabel - toneNormalizedToCarrierCenter(value: Float): Double - toneNormalizedToBodyMix(value: Float): Float
+27.3 Time mapping
+Map TimePreset to seconds.
+27.4 Drift mapping
+Map DriftLevel to float amount.
+________________
+
+
+28. UI animation spec
+28.1 Preset-to-control animation
+When preset selected: - Beat slider animates to new normalized position - Drift snapped thumb animates to new position - Time snapped thumb animates to new position - Tone slider animates to new position - Watch toggle animates if changed
+28.2 Active button animation
+* background crossfades from inactive to navy
+* text color transitions from navy to white
+* duration 200–250ms
+28.3 Helper text animation
+If Modified label appears, fade it in softly.
+________________
+
+
+29. Persistence rules
+29.1 Save on change
+Persist last-used config when: - preset changes - sliders change - watch sync toggles - session stops
+29.2 Restore on launch
+On app launch: - restore last config - restore selected preset - if app was not actively playing, load into setup state only - do not auto-start session unless explicit future feature adds this
+________________
+
+
+30. Session lifecycle
+30.1 Idle
+User is on main screen editing config.
+30.2 Starting
+On Play: - audio engine prepare / start - UI transitions to playback state - session timer starts - if Watch Sync enabled, begin watch adaptation pipeline
+30.3 Playing
+While playing: - elapsed time updates once per second - controls remain adjustable - engine receives smoothed target changes
+30.4 Paused
+On Pause: - timer pauses - audio engine either pauses or drops to zero cleanly - watch adaptation may pause as well
+30.5 Stopped
+On Stop or session complete: - fade out - release or idle engine - finalize session state - save final config
+________________
+
+
+31. Headphone and device behavior
+31.1 Headphone reminder
+Since binaural effect depends on stereo separation, v1 should include a friendly reminder.
+Recommended behavior: - if output route is speaker and user presses Play for first time, show modal or bottom sheet: Binaural sessions work best with headphones. - allow continue anyway - remember dismissal if user chooses Don’t show again
+31.2 Bluetooth / wired handling
+If output device changes mid-session: - keep session alive - update route if possible - do not crash or restart engine harshly
+________________
+
+
+32. Watch architecture v1
+32.1 High-level approach
+Watch side: - collect HR samples - send summarized samples to phone
+Phone side: - receive watch samples - compute baseline and trend - feed small adaptation nudges into drift path logic
+32.2 Minimum watch deliverable for prototype
+Enough to prove: - connection works - HR samples arrive - phone can reflect status - session path can adapt gently
+32.3 If watch is unavailable
+App must remain fully functional without a watch.
+________________
+
+
+33. Settings screen minimal spec
+Minimal settings for v1: - Show headphone reminder - Enable watch features - Keep screen awake during session - About
+Optional later: - Enable diagnostics - Reset to defaults
+________________
+
+
+34. Error handling
+34.1 Audio engine failure
+If audio fails to initialize: - show user-friendly message - keep app usable - do not crash
+Example message: Audio could not start. Please try again.
+34.2 Watch failure
+If watch sync fails: - show muted status - continue session normally without adaptation
+34.3 Storage failure
+If config cannot be restored: - fall back to Deep Sleep or last safe preset
+________________
+
+
+35. Accessibility and usability
+35.1 Touch targets
+All buttons and thumbs should meet comfortable touch sizes.
+35.2 Contrast
+Ensure contrast is readable on light background.
+35.3 Motion
+Animations should be smooth and subtle. No flashy movement.
+35.4 Orientation
+Phone portrait is the primary supported layout in v1. Landscape support is optional.
+________________
+
+
+36. Audio-quality acceptance targets
+These are product-level quality goals.
+Resonz v1 audio should: - feel smooth - feel warm enough in sleep modes - avoid obvious digital clicking - avoid harsh piercing highs - avoid a thin haunted tone - keep frequency transitions calm - preserve stereo image in headphones
+Developer should test on: - at least one wired headphone or good Bluetooth headset - at least one built-in phone speaker for fallback behavior - at least one Google / Wear OS watch if Watch Sync prototype is built
+________________
+
+
+37. Engineering acceptance criteria
+37.1 Main screen
+* four preset buttons render correctly
+* Beat is visually the hero control
+* Drift, Time, Tone sit together beneath it
+* Watch Sync row appears and updates state
+* Play and Advanced buttons work
+37.2 Preset logic
+* pressing a preset animates controls to target values
+* audio targets update accordingly
+* no abrupt audio jumps
+37.3 Beat slider
+* uses non-linear mapping
+* low frequencies are easy to fine-tune
+* display value updates correctly
+37.4 Drift logic
+* drift changes session movement meaningfully
+* Off = stable
+* High = clearly more movement than Low
+37.5 Time logic
+* snap points behave cleanly
+* duration interacts with drift path
+37.6 Tone logic
+* Warm is audibly softer / fuller than Bright
+* sound remains pleasant across the range
+37.7 Watch Sync
+* if enabled on supported preset and watch connected, status becomes active
+* phone receives HR trend updates
+* session path adapts gently
+* if disconnected, session continues normally
+37.8 Persistence
+* last used config restores on relaunch
+________________
+
+
+38. Recommended build phases for coding agent
+Phase 1 — UI skeleton
+Build: - Compose screen layout - preset buttons - Beat slider - Drift slider - Time snapped slider - Tone slider - Watch Sync row - Play / Advanced buttons - ViewModel and state
+No real audio yet except optional placeholder state.
+Phase 2 — Preset animation + local state
+Build: - preset default factory - control animations - modified-state logic - persistence of config
+Phase 3 — Real-time audio engine
+Build: - audio engine abstraction - real-time stereo synthesis - Beat smoothing - Tone mapping - Drift path logic - session timer
+Phase 4 — Playback state
+Build: - playback screen or active playback mode - pause / stop logic - elapsed time UI
+Phase 5 — Watch Sync prototype
+Build: - watch status plumbing - heart-rate sample transport - baseline + trend logic - gentle session adaptation
+Phase 6 — Quality pass
+Build: - sound polish - smoothing polish - UI polish - error handling - headphone reminder
+________________
+
+
+39. Direct coding instructions summary
+If an agent is starting implementation now, the immediate target is:
+Build target A
+A fully functional main screen with: - logo + wordmark - four presets - hero Beat slider - grouped Drift / Time / Tone - Watch Sync row - Play + Advanced buttons - preset-driven slider animation - local state persistence
+Build target B
+Then add: - real-time audio engine driven by the same state - smooth parameter updates - playback flow
+Build target C
+Then add: - Wear OS watch sync prototype using trend-based adaptation
+________________
+
+
+40. Final product rules to protect the design
+These rules matter.
+1. Beat stays the star.
+2. Do not clutter the main screen.
+3. Do not expose too many technical controls in v1.
+4. Sound quality matters as much as functionality.
+5. Watch Sync should be subtle assistance, not gimmick control.
+6. The app should feel calm, premium, and intentional.
+7. Do not let the sound become thin or eerie by default.
+8. Preset buttons must feel satisfying when pressed.
+________________
+
+
+41. v1 implementation checklist
+UI
+* Splash screen
+* Main screen
+* Playback screen
+* Advanced screen stub
+* Settings stub
+State
+* Preset definitions
+* ViewModel actions
+* Config persistence
+* Modified-state logic
+Audio
+* Real-time engine abstraction
+* Beat mapping
+* Tone mapping
+* Drift path logic
+* Fade in/out
+* Pause/resume
+* No-click smoothing
+Watch
+* Connection status
+* Heart-rate sample transport
+* Baseline computation
+* Trend adaptation
+* Disconnect fallback
+QA
+* Preset animation smooth
+* Beat feels controllable at low range
+* Warm mode no longer sounds haunted
+* Sessions survive screen navigation
+* Restored config on relaunch
+________________
+
+
+42. Visual lock rules for coding agent
+This section exists to remove subjective design freedom.
+42.1 Instruction to agent
+Agent must treat the visual values in this spec as locked defaults, not suggestions.
+Agent must not: - invent new colors - change corner radii casually - add gradients - add neon accents - add oversized shadows - redesign button hierarchy - move the Beat slider out of hero position - change button copy without approval - add decorative illustrations or glow effects - switch to dark theme unless explicitly requested later
+Agent may only deviate if: - a hard platform limitation requires it - accessibility requires a small adjustment - a specific issue is documented in code comments
+42.2 Locked main screen structure
+Main screen order is fixed: 1. logo mark 2. wordmark 3. preset grid 4. Beat section 5. Drift section 6. Time section 7. Tone section 8. Watch Sync row 9. Play and Advanced buttons
+No other visual blocks are allowed above Play in v1.
+42.3 Locked button copy
+Use exactly this copy on main screen: - Deep Sleep - Drift to Sleep - Focus - Earth Sync - PLAY - ADVANCED - BEAT - DRIFT - TIME - TONE - Watch Sync
+Do not rename Earth Sync to Ground or similar unless requested.
+42.4 Locked button dimensions
+Preset buttons
+* width: 150dp on 360dp layout target
+* height: 56dp
+* radius: 8dp
+* border inactive: 1dp
+* border color inactive: #C8CED8 at 30% alpha
+* border active: none
+* elevation inactive: 0dp
+* elevation active: 2dp
+Bottom action buttons
+* width: 150dp on 360dp layout target
+* height: 58dp
+* radius: 8dp
+* Play fill: #233463
+* Play text: #FFFFFF
+* Advanced fill: #DCE3EC
+* Advanced border: 1dp #C8CED8 at 35% alpha
+* Advanced text: #1F2740
+Disabled button state
+If disabled state is ever needed: - fill: #E8EBF0 - text: #6C7386 at 70% alpha - border: #C8CED8 at 20% alpha
+42.5 Locked color system
+Use these exact hex values unless accessibility requires adjustment.
+* Background primary: #F5F5F3
+* Card / tile white: #FFFFFF
+* Navy primary: #233463
+* Navy pressed: #1C2A52
+* Navy secondary: #31457A
+* Inactive tile: #DCE3EC
+* Inactive tile pressed: #D3DAE4
+* Text primary: #1F2740
+* Text secondary: #6C7386
+* Text on navy: #FFFFFF
+* Soft line: #C8CED8
+* Slider active track: #5B76B8
+* Slider inactive track: #E2E6ED
+* Slider thumb: #233463
+* Toggle on: #5DBB8A
+* Toggle off: #B8C1D0
+* Error soft: #B85C5C
+* Warm accent: #D8BF8A
+Do not introduce purple, pink, cyan, or black-heavy UI accents.
+42.6 Locked typography rules
+Font weights
+* Wordmark: Medium
+* Page title / hero labels: SemiBold
+* Button labels: Medium
+* Secondary text: Normal
+* Status/helper text: Normal
+Text sizes
+* Wordmark: 40sp
+* Hero numeric value: 28sp
+* Hero label: 16sp
+* Button label: 16sp
+* Secondary label: 13sp
+* Small/status text: 12sp
+Letter case rules
+* Preset buttons: Title Case
+* Bottom action buttons: ALL CAPS
+* Section labels: ALL CAPS
+* Watch Sync row label: Title Case
+42.7 Locked Beat section spec
+* section top gap from preset grid: 28dp
+* label row height: 32dp
+* left label text: BEAT
+* right live value text size: 28sp
+* unit Hz size: 16sp
+* gap label row -> slider: 10dp
+* hero slider rail height: 8dp
+* rail radius: 4dp
+* thumb diameter: 28dp
+* thumb fill: #233463
+* thumb shadow: subtle, 3dp
+* slider touch height total: at least 44dp
+* gap slider -> caption row: 10dp
+* caption row labels: DEEP, DRIFT, CALM, FOCUS
+* caption text size: 12sp
+* caption color: #6C7386
+42.8 Locked fine-tuning section specs
+These three sections must visually read as a grouped cluster.
+Shared rules
+* row label/value height: 28dp
+* gap row -> slider: 8dp
+* slider region height: 36dp
+* rail height: 6dp
+* rail radius: 3dp
+* thumb diameter: 22dp
+* value text size: 13sp
+* label text size: 16sp
+Drift
+* label: DRIFT
+* allowed value labels: Off, Low, Medium, High
+* snapped positions: 4
+* snap marker dots optional, but if shown use 4dp dots in #C8CED8
+Time
+* label: TIME
+* allowed values only: 20 Min, 30 Min, 45 Min, 90 Min, All Night
+* snapped positions: 5
+* if caption labels are shown under rail, use 12sp
+Tone
+* label: TONE
+* continuous slider
+* left caption: WARM
+* right caption: BRIGHT
+* caption text size: 12sp
+* value label derived from tone position: Warm, Neutral, Bright
+42.9 Locked Watch Sync row spec
+* top gap from Tone section: 20dp
+* row min height: 40dp
+* left label: Watch Sync
+* label size: 16sp
+* optional watch icon size: 20dp
+* toggle width: 52dp
+* toggle height: 32dp
+* knob diameter: 28dp
+* on color: #5DBB8A
+* off color: #B8C1D0
+* knob color: #FFFFFF
+* status text below or right: 12sp, color #6C7386
+42.10 Locked spacing between sections
+* screen horizontal padding: 24dp
+* screen top padding: 20dp
+* gap logo -> wordmark: 6dp
+* gap wordmark -> preset grid: 24dp
+* gap between preset rows: 12dp
+* gap between preset columns: 12dp
+* gap Beat captions -> Drift: 24dp
+* gap Drift -> Time: 16dp
+* gap Time -> Tone: 16dp
+* gap Watch Sync -> bottom buttons: 24dp
+* gap between bottom buttons: 12dp
+* screen bottom padding: 24dp
+42.11 Locked border rules
+* buttons and tiles use 1dp border maximum
+* no heavy outlines
+* no double borders
+* inactive tile/button border uses #C8CED8 with 20–35% alpha
+* active buttons use fill emphasis rather than border emphasis
+* sliders do not need borders around the whole control section
+42.12 Locked shadow rules
+* no card shadow larger than 2dp
+* no glowing shadows
+* no drop-shadow on text
+* only active preset buttons and slider thumbs may use subtle shadow
+42.13 Locked background rules
+* main screen background must be solid #F5F5F3
+* no gradients
+* no image backgrounds
+* no particles / animated waves in background on main screen
+42.14 Locked interaction animation timing
+* preset button visual transition: 220ms
+* slider control animation to preset target: 350ms
+* toggle animation: 180–220ms
+* value text updates: immediate
+* no springy cartoon bounce effects
+42.15 Locked logo placement spec
+* logo box width/height: 56dp
+* centered horizontally
+* top margin from safe area: 12dp
+* navy R mark on white/light background
+* wordmark directly beneath
+* no slogan on main screen
+42.16 Locked Compose implementation rule
+Agent must create reusable components with these exact default dimensions: - PresetButton - PrimaryActionButton - SecondaryActionButton - HeroBeatSlider - SnapSliderRow - ToneSliderRow - WatchSyncRow
+Do not let the agent use Material defaults without overriding them to match this spec.
+42.17 Locked preview states required
+Agent must create Compose previews for: - Main screen with Deep Sleep active - Main screen with Drift to Sleep active - Main screen with Focus active - Main screen with Earth Sync active - Main screen modified state - Watch Sync off - Watch Sync waiting - Watch Sync active
+42.18 Final design compliance rule
+If any UI looks more colorful, rounder, softer, darker, or more playful than this spec, it is wrong for v1.
+43. File-by-file Android project blueprint
+This section tells the coding agent exactly what files to create first and what each file is responsible for.
+Recommended package root: com.resonz.app
+________________
+
+
+43.1 Project/module structure
+App module
+Use one Android app module for v1 if speed matters.
+Suggested package layout:
+com.resonz.app
+├── MainActivity.kt
+├── ResonzApplication.kt
+├── navigation/
+│   ├── AppNavGraph.kt
+│   └── Destinations.kt
+├── ui/
+│   ├── theme/
+│   │   ├── Color.kt
+│   │   ├── Type.kt
+│   │   ├── Theme.kt
+│   │   └── ResonzDesignTokens.kt
+│   ├── components/
+│   │   ├── PresetButton.kt
+│   │   ├── PrimaryActionButton.kt
+│   │   ├── SecondaryActionButton.kt
+│   │   ├── HeroBeatSlider.kt
+│   │   ├── SnapSliderRow.kt
+│   │   ├── ToneSliderRow.kt
+│   │   ├── WatchSyncRow.kt
+│   │   ├── ResonzLogo.kt
+│   │   └── SectionHeaderRow.kt
+│   └── preview/
+│       └── PreviewData.kt
+├── model/
+│   ├── PresetId.kt
+│   ├── DriftLevel.kt
+│   ├── TimePreset.kt
+│   ├── ToneLabel.kt
+│   ├── SessionStatus.kt
+│   ├── WatchSyncStatus.kt
+│   ├── ProfileType.kt
+│   ├── SessionConfig.kt
+│   ├── AudioTargets.kt
+│   ├── MainUiState.kt
+│   ├── WatchHeartRateSample.kt
+│   └── PresetDefaults.kt
+├── domain/
+│   ├── AudioTargetMapper.kt
+│   ├── BeatMapping.kt
+│   ├── ToneMapping.kt
+│   ├── DriftPathCalculator.kt
+│   ├── SessionTimerMapper.kt
+│   ├── ConfigModificationChecker.kt
+│   └── WatchTrendInterpreter.kt
+├── data/
+│   ├── prefs/
+│   │   ├── SettingsDataStore.kt
+│   │   └── SessionConfigSerializer.kt
+│   └── repository/
+│       ├── SessionConfigRepository.kt
+│       └── WatchSyncRepository.kt
+├── audio/
+│   ├── AudioEngineController.kt
+│   ├── EngineState.kt
+│   ├── RealTimeAudioEngine.kt
+│   ├── SynthParams.kt
+│   ├── Oscillator.kt
+│   ├── ParameterSmoother.kt
+│   ├── StereoFrameGenerator.kt
+│   └── AudioDebugLogger.kt
+├── feature/
+│   ├── main/
+│   │   ├── MainScreen.kt
+│   │   ├── MainViewModel.kt
+│   │   ├── MainAction.kt
+│   │   └── MainUiEvents.kt
+│   ├── playback/
+│   │   ├── PlaybackScreen.kt
+│   │   └── PlaybackViewModel.kt
+│   ├── advanced/
+│   │   ├── AdvancedScreen.kt
+│   │   └── AdvancedViewModel.kt
+│   └── settings/
+│       ├── SettingsScreen.kt
+│       └── SettingsViewModel.kt
+├── wear/
+│   ├── WatchConnectionState.kt
+│   ├── WearMessageParser.kt
+│   ├── WearSyncManager.kt
+│   └── WearSyncStatusMapper.kt
+└── util/
+    ├── Formatters.kt
+    ├── TimeFormatters.kt
+    ├── Constants.kt
+    └── Extensions.kt
+________________
+
+
+43.2 File responsibilities
+MainActivity.kt
+Responsibilities: - app entry activity - set Compose content - attach theme - host navigation graph
+ResonzApplication.kt
+Responsibilities: - application setup - dependency initialization if needed - logger / analytics stub if later added
+________________
+
+
+44. Theme and design-token files
+ui/theme/ResonzDesignTokens.kt
+Must contain only locked design tokens from this spec.
+Contents: - ResonzColors - ResonzType - ResonzShapes - ResonzSpacing - ResonzStroke - ResonzElevation
+No feature logic here.
+ui/theme/Color.kt
+Contains Compose color definitions or forwards to design tokens.
+ui/theme/Type.kt
+Contains Compose typography configuration.
+ui/theme/Theme.kt
+Contains app theme wrapper.
+Agent must ensure these files do not override the locked spec values casually.
+________________
+
+
+45. Reusable UI component files
+ui/components/ResonzLogo.kt
+Composable for top logo and optional wordmark.
+Required params:
+@Composable
+fun ResonzLogo(
+    showWordmark: Boolean = true,
+    modifier: Modifier = Modifier
+)
+ui/components/PresetButton.kt
+Composable for the four preset buttons.
+Required params:
+@Composable
+fun PresetButton(
+    title: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+)
+Must respect locked dimensions.
+ui/components/PrimaryActionButton.kt
+Used for Play.
+Required params:
+@Composable
+fun PrimaryActionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+)
+ui/components/SecondaryActionButton.kt
+Used for Advanced.
+ui/components/SectionHeaderRow.kt
+Reusable label + right-side value row for Beat, Drift, Time, Tone.
+Required params:
+@Composable
+fun SectionHeaderRow(
+    label: String,
+    valueText: String,
+    modifier: Modifier = Modifier
+)
+ui/components/HeroBeatSlider.kt
+Custom or styled slider for Beat.
+Required params:
+@Composable
+fun HeroBeatSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+)
+Must support: - non-linear mapping externally or internally - 28dp thumb - 8dp rail - smooth drag
+ui/components/SnapSliderRow.kt
+Reusable snapped slider for Drift and Time.
+Required params:
+@Composable
+fun SnapSliderRow(
+    label: String,
+    valueText: String,
+    steps: Int,
+    position: Float,
+    onPositionChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    captions: List<String> = emptyList()
+)
+ui/components/ToneSliderRow.kt
+Specialized slider for Tone.
+ui/components/WatchSyncRow.kt
+Composable for label, icon, toggle, and status text.
+Required params:
+@Composable
+fun WatchSyncRow(
+    enabled: Boolean,
+    statusText: String?,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+)
+________________
+
+
+46. Model files
+model/PresetId.kt
+Enum with exactly four presets.
+model/DriftLevel.kt
+Enum with OFF, LOW, MEDIUM, HIGH.
+model/TimePreset.kt
+Enum with MIN_20, MIN_30, MIN_45, MIN_90, ALL_NIGHT.
+model/ToneLabel.kt
+Enum with WARM, NEUTRAL, BRIGHT.
+model/SessionStatus.kt
+Enum with session lifecycle states.
+model/WatchSyncStatus.kt
+Enum with connection/adaptation states.
+model/ProfileType.kt
+Enum for drift behavior families.
+model/SessionConfig.kt
+Primary user-selected config.
+model/AudioTargets.kt
+Derived engine target set.
+model/MainUiState.kt
+Single source of truth for Main screen.
+model/WatchHeartRateSample.kt
+Heart-rate sample model.
+model/PresetDefaults.kt
+Must be the only source of preset default values.
+________________
+
+
+47. Domain logic files
+domain/BeatMapping.kt
+Must contain: - normalizedToBeatHz() - beatHzToNormalized()
+Purpose: - keep Beat slider non-linear and reversible
+domain/ToneMapping.kt
+Must contain: - toneNormalizedToLabel() - toneNormalizedToCarrierCenter() - toneNormalizedToBodyMix() - toneNormalizedToBrightness()
+domain/AudioTargetMapper.kt
+Converts SessionConfig into AudioTargets.
+Must consider: - preset profile type - tone mapping - time preset seconds - drift amount
+domain/DriftPathCalculator.kt
+Contains drift-curve logic over session time.
+Responsibilities: - compute current target beat for elapsed session time - apply preset profile type - apply drift level - apply watch nudges if enabled
+domain/SessionTimerMapper.kt
+Maps TimePreset to seconds and labels.
+domain/ConfigModificationChecker.kt
+Determines whether config differs enough from preset defaults to count as modified.
+domain/WatchTrendInterpreter.kt
+Converts heart-rate samples into subtle guidance signals.
+Responsibilities: - compute baseline - smooth HR - infer hold, release, or stable
+________________
+
+
+48. Persistence files
+data/prefs/SettingsDataStore.kt
+Handles local persistence.
+Responsibilities: - save last used config - save headphone reminder state - save optional watch feature setting
+data/prefs/SessionConfigSerializer.kt
+Serialize/deserialize config cleanly.
+data/repository/SessionConfigRepository.kt
+Abstraction layer for reading/writing persisted config.
+data/repository/WatchSyncRepository.kt
+Abstraction for watch sync availability and latest samples.
+________________
+
+
+49. Audio files
+audio/AudioEngineController.kt
+Interface layer between UI/domain and actual audio engine.
+audio/EngineState.kt
+State model for engine internals.
+audio/RealTimeAudioEngine.kt
+Main live synthesis implementation.
+Responsibilities: - prepare/start/pause/stop audio - render stereo frames continuously - accept target updates - smooth parameters
+audio/SynthParams.kt
+Low-level parameter bundle used by renderer.
+audio/Oscillator.kt
+Oscillator utilities.
+Can include: - sine oscillator - optional body-layer oscillator helpers
+audio/ParameterSmoother.kt
+Generic smoothing logic.
+Must be reusable across: - beat - carrier - brightness - master gain
+audio/StereoFrameGenerator.kt
+Pure function / class that generates sample frames from current synth params.
+audio/AudioDebugLogger.kt
+Optional lightweight logging for engine diagnostics.
+________________
+
+
+50. Feature files
+feature/main/MainAction.kt
+Contains the action sealed interface.
+feature/main/MainUiEvents.kt
+Optional one-off UI events such as snackbars or navigation.
+feature/main/MainViewModel.kt
+The main brain of v1.
+Responsibilities: - own MainUiState - load last config - respond to button/slider actions - call mapping functions - persist config - push audio targets to engine - coordinate watch status
+feature/main/MainScreen.kt
+Compose screen for session setup.
+Responsibilities: - render full locked layout - no business logic inside composables beyond view callbacks - use reusable components from ui/components
+feature/playback/PlaybackScreen.kt
+Screen or overlay for active playback state.
+feature/playback/PlaybackViewModel.kt
+Can share state with MainViewModel if agent wants to keep v1 simpler. If so, document that choice clearly.
+feature/advanced/AdvancedScreen.kt
+Stub or lightweight advanced screen.
+feature/advanced/AdvancedViewModel.kt
+May be minimal in v1.
+feature/settings/SettingsScreen.kt
+Minimal settings.
+feature/settings/SettingsViewModel.kt
+State holder for settings.
+________________
+
+
+51. Navigation files
+navigation/Destinations.kt
+Defines route names.
+Suggested routes: - main - playback - advanced - settings
+navigation/AppNavGraph.kt
+Compose navigation setup.
+________________
+
+
+52. Wear / watch files
+wear/WatchConnectionState.kt
+Connection state model.
+wear/WearMessageParser.kt
+Parses incoming watch payloads.
+wear/WearSyncManager.kt
+Coordinates watch connectivity and incoming HR samples.
+wear/WearSyncStatusMapper.kt
+Maps raw watch state to UI-friendly WatchSyncStatus.
+________________
+
+
+53. Utility files
+util/Formatters.kt
+Must contain: - beat display formatter - tone label formatter - drift label formatter
+util/TimeFormatters.kt
+Must contain: - time preset label formatter - elapsed timer formatter
+util/Constants.kt
+Holds constants such as: - min/max beat - smoothing defaults - session defaults
+util/Extensions.kt
+Only harmless extensions. Do not put business logic here.
+________________
+
+
+54. First-pass implementation order for agent
+Step 1
+Create theme/design token files: - ResonzDesignTokens.kt - Color.kt - Type.kt - Theme.kt
+Step 2
+Create model files.
+Step 3
+Create mapping/domain files: - BeatMapping n- ToneMapping - SessionTimerMapper - PresetDefaults - ConfigModificationChecker
+Step 4
+Create reusable UI components: - PresetButton - PrimaryActionButton - SecondaryActionButton - SectionHeaderRow - HeroBeatSlider - SnapSliderRow - ToneSliderRow - WatchSyncRow - ResonzLogo
+Step 5
+Create MainUiState, MainAction, and MainViewModel.
+Step 6
+Create MainScreen.kt and wire up full static UI + preview states.
+Step 7
+Add persistence.
+Step 8
+Add audio engine interface and stub implementation.
+Step 9
+Replace stub with real-time engine.
+Step 10
+Add playback screen.
+Step 11
+Add watch sync plumbing.
+________________
+
+
+55. Non-negotiable coding rules for agent
+1. Do not hardcode random dimensions inside feature composables.
+2. Do not hardcode random hex colors inside screen files.
+3. All layout values must come from design-token files or dedicated constants.
+4. All preset values must come from PresetDefaults.kt.
+5. All slider-to-domain mappings must live in domain files, not in composables.
+6. MainScreen must stay visually dumb; logic belongs in ViewModel/domain.
+7. Audio engine must be controlled through an interface.
+8. Watch sync must fail gracefully without breaking sessions.
+9. Keep Kotlin files focused; do not create giant 1000-line files if avoidable.
+10. Preserve the locked UI structure and spacing from this spec.
+________________
+
+
+56. Immediate first implementation note
+The first code pass should not start with the watch or with audio perfection.
+It should start with: - clean Compose layout - state model - preset-to-control animation - value mapping utilities - preview states
+Once the UI state behavior feels correct, connect the audio engine.
+That is the fastest path to a working Resonz v1.
