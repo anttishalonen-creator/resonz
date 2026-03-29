@@ -106,4 +106,97 @@ class MainViewModel : ViewModel() {
         position < 0.875f -> TimePreset.MIN_90
         else -> TimePreset.ALL_NIGHT
     }))
+
+    fun generateMoodBasedAudio() {
+        val config = _uiState.value.config
+        val timeSeconds = timePresetToSeconds(config.timePreset)
+        
+        val adjustedConfig = when (config.presetId) {
+            PresetId.DEEP_SLEEP -> adjustForDeepSleep(config, timeSeconds)
+            PresetId.DRIFT_TO_SLEEP -> adjustForDriftToSleep(config, timeSeconds)
+            PresetId.FOCUS -> adjustForFocus(config, timeSeconds)
+            PresetId.EARTH_SYNC -> adjustForEarthSync(config, timeSeconds)
+        }
+        
+        _uiState.update {
+            it.copy(
+                config = adjustedConfig,
+                activeBeatDisplayHz = adjustedConfig.beatHz,
+                currentTotalSec = timePresetToSeconds(adjustedConfig.timePreset),
+            )
+        }
+        pushAudioTargets(adjustedConfig)
+    }
+
+    private fun adjustForDeepSleep(config: SessionConfig, timeSeconds: Int): SessionConfig {
+        val baseBeat = 3.0
+        val beatAdjustment = when {
+            timeSeconds >= 5400 -> -0.5
+            timeSeconds >= 2700 -> -0.2
+            else -> 0.0
+        }
+        val toneAdjustment = if (timeSeconds > 3600) -0.05f else 0f
+        
+        return config.copy(
+            beatHz = (baseBeat + beatAdjustment).coerceIn(1.0, 5.0),
+            toneNormalized = (config.toneNormalized + toneAdjustment).coerceIn(0.1f, 0.4f),
+            driftLevel = if (timeSeconds > 3600) DriftLevel.LOW else DriftLevel.OFF,
+        )
+    }
+
+    private fun adjustForDriftToSleep(config: SessionConfig, timeSeconds: Int): SessionConfig {
+        val baseBeat = 8.0
+        val driftIntensity = when {
+            timeSeconds <= 1200 -> DriftLevel.HIGH
+            timeSeconds <= 2700 -> DriftLevel.MEDIUM
+            else -> DriftLevel.LOW
+        }
+        val toneAdjustment = when {
+            timeSeconds > 3600 -> -0.08f
+            timeSeconds < 1800 -> 0.05f
+            else -> 0f
+        }
+        
+        return config.copy(
+            beatHz = baseBeat,
+            driftLevel = driftIntensity,
+            toneNormalized = (config.toneNormalized + toneAdjustment).coerceIn(0.1f, 0.5f),
+        )
+    }
+
+    private fun adjustForFocus(config: SessionConfig, timeSeconds: Int): SessionConfig {
+        val baseBeat = 40.0
+        val beatAdjustment = when {
+            timeSeconds <= 1200 -> 5.0
+            timeSeconds <= 1800 -> 0.0
+            else -> -2.0
+        }
+        val toneAdjustment = when {
+            timeSeconds <= 1200 -> 0.1f
+            timeSeconds <= 1800 -> 0.0f
+            else -> -0.05f
+        }
+        
+        return config.copy(
+            beatHz = (baseBeat + beatAdjustment).coerceIn(20.0, 40.0),
+            toneNormalized = (0.62f + toneAdjustment).coerceIn(0.4f, 0.8f),
+            driftLevel = DriftLevel.OFF,
+        )
+    }
+
+    private fun adjustForEarthSync(config: SessionConfig, timeSeconds: Int): SessionConfig {
+        val baseBeat = 7.83
+        val beatVariation = kotlin.math.sin(timeSeconds.toDouble() / 3600.0) * 0.5
+        val toneAdjustment = when {
+            timeSeconds <= 1200 -> 0.05f
+            timeSeconds <= 2700 -> 0.0f
+            else -> -0.05f
+        }
+        
+        return config.copy(
+            beatHz = (baseBeat + beatVariation).coerceIn(6.0, 10.0),
+            toneNormalized = (config.toneNormalized + toneAdjustment).coerceIn(0.1f, 0.4f),
+            driftLevel = DriftLevel.LOW,
+        )
+    }
 }

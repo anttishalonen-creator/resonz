@@ -74,10 +74,21 @@ fun MainScreen(
             Text(it, color = ResonzColors.TextSecondary, fontSize = ResonzType.StatusText)
         }
 
-        Spacer(modifier = Modifier.height(ResonzSpacing.BottomButtonsTopGap))
+        Spacer(modifier = Modifier.weight(1f))
+        
+        PlayButton(
+            text = "START SESSION",
+            onClick = { 
+                viewModel.generateMoodBasedAudio()
+                viewModel.onAction(MainAction.PlayPause)
+                onOpenPlayback()
+            }
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResonzSpacing.GridGap)) {
-            PrimaryActionButton("PLAY", { viewModel.onAction(MainAction.PlayPause); onOpenPlayback() }, Modifier.weight(1f))
-            SecondaryActionButton("ADVANCED", onOpenAdvanced, Modifier.weight(1f))
+            SecondaryActionButton("TUNING", onOpenAdvanced, Modifier.weight(1f))
         }
     }
 }

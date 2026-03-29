@@ -23,6 +23,8 @@ object ResonzColors {
     val ToggleOff = Color(0xFFB8C1D0)
     val ErrorSoft = Color(0xFFB85C5C)
     val WarmAccent = Color(0xFFD8BF8A)
+    val PlayButton = Color(0xFF8B9A4A)
+    val PlayButtonPressed = Color(0xFF6E7A3A)
 }
 
 object ResonzType {
