@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
 class SessionCoordinator : ViewModel() {
-    private val audioEngine = RealTimeAudioEngine()
+    val audioEngine = RealTimeAudioEngine()
     
     private val _uiState = MutableStateFlow(
         SessionUiState(
@@ -29,6 +29,10 @@ class SessionCoordinator : ViewModel() {
     
     private var timerJob: Job? = null
     
+    init {
+        audioEngine.setSoundMode(SoundMode.OCEAN)
+    }
+    
     fun selectPreset(presetId: PresetId) {
         val config = PresetDefaults.byId(presetId)
         val profile = PresetAudioProfiles.fromPreset(presetId)
@@ -42,14 +46,20 @@ class SessionCoordinator : ViewModel() {
                 soundMode = SoundMode.OCEAN
             )
         }
+        
+        audioEngine.setSoundMode(SoundMode.OCEAN)
+        audioEngine.prepare(config)
     }
     
     fun setBeat(normalized: Float) {
-        updateConfig { copy(beatHz = normalizedToBeatHz(normalized)) }
+        val beatHz = normalizedToBeatHz(normalized)
+        updateConfig { copy(beatHz = beatHz) }
+        audioEngine.updateBeatTarget(beatHz.toFloat())
     }
     
     fun setTone(normalized: Float) {
         updateConfig { copy(toneNormalized = normalized) }
+        audioEngine.updateToneTarget(normalized)
     }
     
     fun setDrift(level: DriftLevel) {
@@ -58,6 +68,7 @@ class SessionCoordinator : ViewModel() {
     
     fun setTime(preset: TimePreset) {
         updateConfig { copy(timePreset = preset) }
+        _uiState.update { it.copy(totalSec = timePresetToSeconds(preset)) }
     }
     
     fun setSoundMode(mode: SoundMode) {
@@ -72,8 +83,7 @@ class SessionCoordinator : ViewModel() {
         
         _uiState.update {
             it.copy(
-                config = updated.copy(isModified = isModified),
-                totalSec = timePresetToSeconds(updated.timePreset)
+                config = updated.copy(isModified = isModified)
             )
         }
     }
@@ -89,7 +99,9 @@ class SessionCoordinator : ViewModel() {
     
     private fun start() {
         val config = _uiState.value.config
+        val mode = _uiState.value.soundMode
         
+        audioEngine.setSoundMode(mode)
         audioEngine.prepare(config)
         audioEngine.start(config)
         

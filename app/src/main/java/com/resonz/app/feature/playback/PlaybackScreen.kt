@@ -13,17 +13,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.resonz.app.ui.theme.*
 import com.resonz.app.util.formatBeatHz
 import com.resonz.app.session.TransportState
+import com.resonz.app.session.SessionCoordinator
 
 @Composable
 fun PlaybackScreen(
+    coordinator: SessionCoordinator,
     onBack: () -> Unit,
-    viewModel: PlaybackViewModel = viewModel()
+    viewModel: PlaybackViewModel = PlaybackViewModel(coordinator)
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by coordinator.uiState.collectAsState()
 
     Column(
         modifier = Modifier

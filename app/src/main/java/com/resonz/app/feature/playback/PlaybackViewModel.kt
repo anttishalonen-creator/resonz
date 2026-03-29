@@ -5,9 +5,7 @@ import com.resonz.app.session.SessionCoordinator
 import com.resonz.app.session.SessionUiState
 import kotlinx.coroutines.flow.StateFlow
 
-class PlaybackViewModel : ViewModel() {
-    private val coordinator = SessionCoordinator()
-    
+class PlaybackViewModel(val coordinator: SessionCoordinator) : ViewModel() {
     val uiState: StateFlow<SessionUiState> = coordinator.uiState
     
     fun startOrPause() {

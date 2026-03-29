@@ -235,6 +235,37 @@ class RealTimeAudioEngine : AudioEngineController {
     fun setSoundMode(mode: SoundMode) {
         currentSoundMode = mode
     }
+    
+    fun updateBeatTarget(beatHz: Float) {
+        smoothedBeat.setTarget(beatHz)
+    }
+    
+    fun updateToneTarget(toneNormalized: Float) {
+        val carrier = toneToCarrier(toneNormalized)
+        val body = toneToBodyMix(toneNormalized)
+        val ocean = toneToOceanMix(toneNormalized)
+        smoothedCarrier.setTarget(carrier)
+        smoothedBodyMix.setTarget(body)
+        smoothedOceanMix.setTarget(ocean)
+    }
+    
+    private fun toneToOceanMix(tone: Float): Float = when {
+        tone < 0.33f -> 0.06f
+        tone < 0.66f -> 0.04f
+        else -> 0.02f
+    }
+    
+    private fun toneToCarrier(tone: Float): Float = when {
+        tone < 0.33f -> 140f + tone * 120f
+        tone < 0.66f -> 180f + (tone - 0.33f) * 180f
+        else -> 240f + (tone - 0.66f) * 120f
+    }
+    
+    private fun toneToBodyMix(tone: Float): Float = when {
+        tone < 0.33f -> 0.25f - tone * 0.15f
+        tone < 0.66f -> 0.20f
+        else -> 0.15f - (tone - 0.66f) * 0.3f
+    }.coerceIn(0.05f, 0.30f)
 
     private fun timeToSeconds(timePreset: TimePreset): Int = when (timePreset) {
         TimePreset.MIN_20 -> 1200

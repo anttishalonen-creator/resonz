@@ -9,7 +9,7 @@ import com.resonz.app.session.TransportState
 import kotlinx.coroutines.flow.StateFlow
 
 class MainViewModel : ViewModel() {
-    private val coordinator = SessionCoordinator()
+    val coordinator = SessionCoordinator()
     
     val uiState: StateFlow<SessionUiState> = coordinator.uiState
 

@@ -1,17 +1,23 @@
 package com.resonz.app.feature.main
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.resonz.app.model.PresetId
+import com.resonz.app.session.SoundMode
 import com.resonz.app.session.TransportState
 import com.resonz.app.ui.components.*
 import com.resonz.app.ui.theme.*
@@ -59,6 +65,40 @@ fun MainScreen(
         SnapSliderRow("TIME", viewModel.timeLabel(), 5, viewModel.timePosition(), { viewModel.setTimeFromPosition(it) }, captions = listOf("20", "30", "45", "90", "Night"))
         Spacer(modifier = Modifier.height(16.dp))
         ToneSliderRow(uiState.config.toneNormalized, viewModel.toneLabel(), { viewModel.onAction(MainAction.SetToneNormalized(it)) })
+
+        Spacer(modifier = Modifier.height(20.dp))
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SoundMode.values().forEach { mode ->
+                val isSelected = uiState.soundMode == mode
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) ResonzColors.NavyPrimary else ResonzColors.LineSoft.copy(alpha = 0.3f),
+                            shape = RoundedCornerShape(ResonzShapes.ButtonRadius)
+                        )
+                        .background(
+                            color = if (isSelected) ResonzColors.NavyPrimary else ResonzColors.TileInactive,
+                            shape = RoundedCornerShape(ResonzShapes.ButtonRadius)
+                        )
+                        .clickable { viewModel.setSoundMode(mode) },
+                    contentAlignment = androidx.compose.ui.Alignment.Center
+                ) {
+                    Text(
+                        text = mode.name,
+                        color = if (isSelected) ResonzColors.TextOnNavy else ResonzColors.TextPrimary,
+                        fontSize = ResonzType.SecondaryLabel,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(40.dp))
         
