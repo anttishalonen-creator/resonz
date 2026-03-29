@@ -104,26 +104,18 @@ fun PlaybackScreen(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(ResonzSpacing.GridGap)
+        IconButton(
+            onClick = {
+                viewModel.stop()
+                onBack()
+            },
+            modifier = Modifier.size(56.dp)
         ) {
-            Button(
-                onClick = {
-                    viewModel.stop()
-                    onBack()
-                },
-                modifier = Modifier.weight(1f).height(58.dp),
-                shape = RoundedCornerShape(ResonzShapes.ButtonRadius),
-                border = BorderStroke(1.dp, ResonzColors.LineSoft.copy(alpha = 0.35f)),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = ResonzColors.TileInactive,
-                    contentColor = ResonzColors.TextPrimary
-                ),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-            ) {
-                Text("STOP", fontSize = ResonzType.ButtonLabel, fontWeight = FontWeight.Medium)
-            }
+            Text(
+                text = "■",
+                color = ResonzColors.ErrorSoft,
+                fontSize = 32.sp
+            )
         }
 
         Spacer(modifier = Modifier.height(ResonzSpacing.BottomPadding))

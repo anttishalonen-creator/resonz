@@ -9,7 +9,6 @@ import com.resonz.app.model.SessionConfig
 import kotlinx.coroutines.*
 import kotlin.math.PI
 import kotlin.math.sin
-import kotlin.math.cos
 
 class RealTimeAudioEngine : AudioEngineController {
     private var state: EngineState = EngineState.IDLE
@@ -25,7 +24,6 @@ class RealTimeAudioEngine : AudioEngineController {
     private var leftPhase = 0.0
     private var rightPhase = 0.0
     private var bodyPhase = 0.0
-    private var noisePhase = 0.0
     
     private var targetBeatHz = 8.0
     private var targetCarrierCenter = 180.0
@@ -184,8 +182,8 @@ class RealTimeAudioEngine : AudioEngineController {
             val leftFreq = currentCarrierCenter - currentBeatHz / 2.0
             val rightFreq = currentCarrierCenter + currentBeatHz / 2.0
             
-            val leftSample = sin(leftPhase * 2.0 * PI).toFloat()
-            val rightSample = sin(rightPhase * 2.0 * PI).toFloat()
+            val leftSample = generateRichTone(leftPhase, currentCarrierCenter, currentBrightness)
+            val rightSample = generateRichTone(rightPhase, currentCarrierCenter, currentBrightness)
             
             leftPhase += leftFreq / sampleRate
             rightPhase += rightFreq / sampleRate
@@ -193,23 +191,47 @@ class RealTimeAudioEngine : AudioEngineController {
             if (rightPhase >= 1.0) rightPhase -= 1.0
             
             val bodyFreq = currentCarrierCenter * 0.5
-            val bodySample = sin(bodyPhase * 2.0 * PI).toFloat() * currentBodyMix
+            val bodySample = generateBodyTone(bodyPhase, currentCarrierCenter) * currentBodyMix
             bodyPhase += bodyFreq / sampleRate
             if (bodyPhase >= 1.0) bodyPhase -= 1.0
             
-            var noise = 0f
-            if (currentBrightness > 0.7f) {
-                val brightnessFactor = (currentBrightness - 0.7f) / 0.3f
-                noise = ((sin(noisePhase * 2.0 * PI * 0.1) + 1f) * 0.5f - 0.5f).toFloat() * 0.02f * brightnessFactor
-                noisePhase += 1.0 / sampleRate
-                if (noisePhase >= 10.0) noisePhase -= 10.0
-            }
+            val left = (leftSample + bodySample) * currentMasterGain
+            val right = (rightSample + bodySample) * currentMasterGain
             
-            val left = (leftSample + bodySample + noise) * currentMasterGain
-            val right = (rightSample + bodySample + noise) * currentMasterGain
-            
-            buffer[i] = left.coerceIn(-1f, 1f)
-            buffer[i + 1] = right.coerceIn(-1f, 1f)
+            buffer[i] = softLimit(left)
+            buffer[i + 1] = softLimit(right)
+        }
+    }
+
+    private fun generateRichTone(phase: Double, carrierFreq: Double, brightness: Float): Float {
+        val fundamental = sin(phase * 2.0 * PI).toFloat()
+        
+        val harmonic2Phase = phase * 2.0
+        val harmonic2 = sin(harmonic2Phase * 2.0 * PI).toFloat() * 0.3f
+        
+        val harmonic3Phase = phase * 3.0
+        val harmonic3 = sin(harmonic3Phase * 2.0 * PI).toFloat() * 0.15f
+        
+        val brightnessMix = brightness * 0.3f
+        return fundamental + harmonic2 * brightnessMix + harmonic3 * brightnessMix
+    }
+
+    private fun generateBodyTone(phase: Double, carrierFreq: Double): Float {
+        val fundamental = sin(phase * 2.0 * PI).toFloat()
+        
+        val subPhase = phase * 0.5
+        val sub = sin(subPhase * 2.0 * PI).toFloat() * 0.4f
+        
+        return fundamental * 0.6f + sub * 0.4f
+    }
+
+    private fun softLimit(sample: Float): Float {
+        return if (sample > 0.8f) {
+            0.8f + (sample - 0.8f) * 0.3f
+        } else if (sample < -0.8f) {
+            -0.8f + (sample + 0.8f) * 0.3f
+        } else {
+            sample
         }
     }
 

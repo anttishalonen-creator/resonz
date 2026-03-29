@@ -74,7 +74,7 @@ fun MainScreen(
             Text(it, color = ResonzColors.TextSecondary, fontSize = ResonzType.StatusText)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(32.dp))
         
         PlayButton(
             text = "START SESSION",
@@ -90,5 +90,7 @@ fun MainScreen(
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResonzSpacing.GridGap)) {
             SecondaryActionButton("TUNING", onOpenAdvanced, Modifier.weight(1f))
         }
+        
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }
