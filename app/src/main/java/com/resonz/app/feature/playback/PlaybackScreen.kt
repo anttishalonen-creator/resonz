@@ -1,10 +1,8 @@
 package com.resonz.app.feature.playback
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,6 +16,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.resonz.app.ui.theme.*
 import com.resonz.app.util.formatBeatHz
+import com.resonz.app.session.TransportState
 
 @Composable
 fun PlaybackScreen(
@@ -70,7 +69,7 @@ fun PlaybackScreen(
         Spacer(modifier = Modifier.height(48.dp))
 
         Text(
-            text = uiState.presetName,
+            text = uiState.config.presetId.name.replace("_", " "),
             color = ResonzColors.TextPrimary,
             fontSize = ResonzType.ScreenTitle,
             fontWeight = FontWeight.SemiBold
@@ -79,7 +78,7 @@ fun PlaybackScreen(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = formatBeatHz(uiState.beatHz),
+            text = formatBeatHz(uiState.displayedBeatHz),
             color = ResonzColors.NavyPrimary,
             fontSize = ResonzType.HeroValue,
             fontWeight = FontWeight.SemiBold
@@ -88,7 +87,7 @@ fun PlaybackScreen(
         Spacer(modifier = Modifier.weight(1f))
 
         Button(
-            onClick = { viewModel.togglePause() },
+            onClick = { viewModel.startOrPause() },
             modifier = Modifier.size(80.dp).clip(CircleShape),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ResonzColors.NavyPrimary,
@@ -97,26 +96,12 @@ fun PlaybackScreen(
             shape = CircleShape
         ) {
             Text(
-                text = if (uiState.isPaused) "▶" else "❚❚",
+                text = if (uiState.transportState == TransportState.PAUSED) "▶" else "❚❚",
                 fontSize = 24.sp
             )
         }
 
         Spacer(modifier = Modifier.weight(1f))
-
-        IconButton(
-            onClick = {
-                viewModel.stop()
-                onBack()
-            },
-            modifier = Modifier.size(56.dp)
-        ) {
-            Text(
-                text = "■",
-                color = ResonzColors.ErrorSoft,
-                fontSize = 32.sp
-            )
-        }
 
         Spacer(modifier = Modifier.height(ResonzSpacing.BottomPadding))
     }

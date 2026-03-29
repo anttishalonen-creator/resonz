@@ -2,7 +2,8 @@ package com.resonz.app.feature.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Text
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -11,7 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.resonz.app.model.PresetId
-import com.resonz.app.model.WatchSyncStatus
+import com.resonz.app.session.TransportState
 import com.resonz.app.ui.components.*
 import com.resonz.app.ui.theme.*
 import com.resonz.app.util.formatBeatHz
@@ -31,7 +32,8 @@ fun MainScreen(
             .fillMaxSize()
             .background(ResonzColors.BgPrimary)
             .padding(horizontal = ResonzSpacing.ScreenHorizontal)
-            .padding(top = ResonzSpacing.TopPadding, bottom = ResonzSpacing.BottomPadding),
+            .padding(top = ResonzSpacing.TopPadding)
+            .verticalScroll(rememberScrollState())
     ) {
         ResonzLogo(modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(24.dp))
@@ -58,32 +60,36 @@ fun MainScreen(
         Spacer(modifier = Modifier.height(16.dp))
         ToneSliderRow(uiState.config.toneNormalized, viewModel.toneLabel(), { viewModel.onAction(MainAction.SetToneNormalized(it)) })
 
-        Spacer(modifier = Modifier.height(20.dp))
-        val statusText = when (uiState.watchSyncStatus) {
-            WatchSyncStatus.OFF -> "Off"
-            WatchSyncStatus.WAITING -> "Waiting for watch"
-            WatchSyncStatus.CONNECTED -> "Watch connected"
-            WatchSyncStatus.ACTIVE -> "Following heart-rate trend"
-            WatchSyncStatus.DISCONNECTED -> "Watch disconnected"
-            WatchSyncStatus.UNSUPPORTED_FOR_PRESET -> "Not active for this mode"
-        }
-        WatchSyncRow(uiState.config.watchSyncEnabled, statusText, { viewModel.onAction(MainAction.ToggleWatchSync(it)) })
-
-        uiState.statusMessage?.let {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(it, color = ResonzColors.TextSecondary, fontSize = ResonzType.StatusText)
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(40.dp))
         
-        PlayButton(
-            text = "START SESSION",
-            onClick = { 
-                viewModel.generateMoodBasedAudio()
-                viewModel.onAction(MainAction.PlayPause)
-                onOpenPlayback()
+        when (uiState.transportState) {
+            TransportState.IDLE, TransportState.STOPPED -> {
+                PlayButton(
+                    text = "START SESSION",
+                    onClick = {
+                        viewModel.onAction(MainAction.PlayPause)
+                        onOpenPlayback()
+                    }
+                )
             }
-        )
+            TransportState.PLAYING -> {
+                PlayButton(
+                    text = "PAUSE",
+                    onClick = {
+                        viewModel.onAction(MainAction.PlayPause)
+                    }
+                )
+            }
+            TransportState.PAUSED -> {
+                PlayButton(
+                    text = "RESUME",
+                    onClick = {
+                        viewModel.onAction(MainAction.PlayPause)
+                    }
+                )
+            }
+            else -> { }
+        }
         
         Spacer(modifier = Modifier.height(12.dp))
         
@@ -91,6 +97,6 @@ fun MainScreen(
             SecondaryActionButton("TUNING", onOpenAdvanced, Modifier.weight(1f))
         }
         
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(32.dp))
     }
 }

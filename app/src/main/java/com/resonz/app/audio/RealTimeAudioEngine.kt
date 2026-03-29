@@ -3,16 +3,17 @@ package com.resonz.app.audio
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import com.resonz.app.model.AudioTargets
+import com.resonz.app.model.PresetId
 import com.resonz.app.model.ProfileType
 import com.resonz.app.model.SessionConfig
+import com.resonz.app.model.TimePreset
+import com.resonz.app.model.DriftLevel
 import kotlinx.coroutines.*
-import kotlin.math.PI
-import kotlin.math.sin
+import com.resonz.app.session.SoundMode
 
 class RealTimeAudioEngine : AudioEngineController {
     private var state: EngineState = EngineState.IDLE
-    private var lastTargets: AudioTargets? = null
+    private var renderLoopActive = true
     
     private var audioTrack: AudioTrack? = null
     private var playbackJob: Job? = null
@@ -21,69 +22,76 @@ class RealTimeAudioEngine : AudioEngineController {
     private val sampleRate = 48000
     private val bufferSize = 2048
     
-    private var leftPhase = 0.0
-    private var rightPhase = 0.0
-    private var bodyPhase = 0.0
+    private val leftOsc = SineOscillator()
+    private val rightOsc = SineOscillator()
+    private val h2LeftOsc = SineOscillator()
+    private val h2RightOsc = SineOscillator()
+    private val h3LeftOsc = SineOscillator()
+    private val h3RightOsc = SineOscillator()
+    private val bodyOsc = SineOscillator()
     
-    private var targetBeatHz = 8.0
-    private var targetCarrierCenter = 180.0
-    private var targetBodyMix = 0.15f
-    private var targetBrightness = 0.5f
-    private var targetMasterGain = 0.0f
+    private val oceanRenderer = OceanLayerRenderer(sampleRate.toFloat())
     
-    private var currentBeatHz = 8.0
-    private var currentCarrierCenter = 180.0
-    private var currentBodyMix = 0.15f
-    private var currentBrightness = 0.5f
-    private var currentMasterGain = 0.0f
+    private val dcBlockL = DcBlocker()
+    private val dcBlockR = DcBlocker()
     
-    private var isFadingIn = false
-    private var isFadingOut = false
-    private var fadeStartTime = 0L
-    private val fadeDurationMs = 800L
+    private val smoothedBeat = SmoothedValue(3.0f, 0.02f)
+    private val smoothedCarrier = SmoothedValue(170f, 0.02f)
+    private val smoothedBodyMix = SmoothedValue(0f, 0.02f)
+    private val smoothedOceanMix = SmoothedValue(0f, 0.02f)
+    private val smoothedHarmonic2 = SmoothedValue(0f, 0.02f)
+    private val smoothedHarmonic3 = SmoothedValue(0f, 0.02f)
+    private val smoothedMasterGain = SmoothedValue(0f, 0.01f)
     
+    private var currentPresetId = PresetId.DEEP_SLEEP
+    private var currentSoundMode = SoundMode.OCEAN
     private var sessionStartTime = 0L
     private var sessionDurationSec = 0
     private var profileType = ProfileType.STABLE
     private var driftAmount = 0f
-    private var anchorBeat = 8.0
+    private var anchorBeat = 3.0f
     
-    private var watchHeartRateAdjustment = 0.0
+    private val masterGainTarget = 0.26f
 
     override fun prepare(config: SessionConfig) {
-        state = EngineState.PREPARED
-        initializeTargetsFromConfig(config)
+        loadFromConfig(config)
+        state = EngineState.IDLE
     }
 
-    private fun initializeTargetsFromConfig(config: SessionConfig) {
-        val targets = AudioTargets(
-            beatHz = config.beatHz,
-            carrierCenterHz = toneToCarrier(config.toneNormalized),
-            bodyMix = toneToBodyMix(config.toneNormalized),
-            brightness = config.toneNormalized,
-            masterGain = 0.0f,
-            profileType = getProfileType(config.presetId),
-            driftAmount = driftLevelToAmount(config.driftLevel),
-            sessionDurationSec = timeToSeconds(config.timePreset)
-        )
-        updateTargets(targets)
-    }
-
-    override fun start(config: SessionConfig) {
-        initializeTargetsFromConfig(config)
-        
-        sessionStartTime = System.currentTimeMillis()
+    private fun loadFromConfig(config: SessionConfig) {
+        currentPresetId = config.presetId
         sessionDurationSec = timeToSeconds(config.timePreset)
         profileType = getProfileType(config.presetId)
         driftAmount = driftLevelToAmount(config.driftLevel)
-        anchorBeat = config.beatHz
+        anchorBeat = config.beatHz.toFloat()
         
-        targetMasterGain = 0.8f
-        isFadingIn = true
-        fadeStartTime = System.currentTimeMillis()
+        val profile = PresetAudioProfiles.fromPreset(config.presetId)
+        smoothedCarrier.setTarget(profile.carrierHz)
+        smoothedBeat.setTarget(profile.beatHz)
+        smoothedBodyMix.setTarget(profile.bodyMix)
+        smoothedOceanMix.setTarget(profile.oceanMix)
+        smoothedHarmonic2.setTarget(profile.harmonic2Mix)
+        smoothedHarmonic3.setTarget(profile.harmonic3Mix)
+        
+        smoothedCarrier.reset(profile.carrierHz)
+        smoothedBeat.reset(profile.beatHz)
+        smoothedBodyMix.reset(profile.bodyMix)
+        smoothedOceanMix.reset(profile.oceanMix)
+        smoothedHarmonic2.reset(profile.harmonic2Mix)
+        smoothedHarmonic3.reset(profile.harmonic3Mix)
+    }
+
+    override fun start(config: SessionConfig) {
+        loadFromConfig(config)
+        
+        sessionStartTime = System.currentTimeMillis()
+        
+        smoothedMasterGain.setTarget(0f)
+        smoothedMasterGain.reset(0f)
+        smoothedMasterGain.setTarget(masterGainTarget)
         
         startAudioPlayback()
-        state = EngineState.PLAYING
+        state = EngineState.RUNNING
     }
 
     private fun startAudioPlayback() {
@@ -115,145 +123,96 @@ class RealTimeAudioEngine : AudioEngineController {
 
         playbackJob = scope.launch {
             val buffer = FloatArray(bufferSize * 2)
-            while (isActive && state == EngineState.PLAYING) {
-                updateParameters()
+            while (isActive && renderLoopActive) {
                 generateAudioBuffer(buffer)
                 audioTrack?.write(buffer, 0, buffer.size, AudioTrack.WRITE_BLOCKING)
+                
+                when (state) {
+                    EngineState.STOPPED -> {
+                        renderLoopActive = false
+                    }
+                    else -> { }
+                }
             }
         }
-    }
-
-    private fun updateParameters() {
-        val now = System.currentTimeMillis()
-        
-        if (isFadingIn) {
-            val elapsed = now - fadeStartTime
-            val progress = (elapsed.toFloat() / fadeDurationMs).coerceIn(0f, 1f)
-            currentMasterGain = progress * targetMasterGain
-            if (progress >= 1f) isFadingIn = false
-        } else if (isFadingOut) {
-            val elapsed = now - fadeStartTime
-            val progress = (elapsed.toFloat() / fadeDurationMs).coerceIn(0f, 1f)
-            currentMasterGain = (1f - progress) * targetMasterGain
-            if (progress >= 1f) {
-                isFadingOut = false
-                audioTrack?.stop()
-                audioTrack?.release()
-                audioTrack = null
-                state = EngineState.STOPPED
-            }
-        }
-        
-        val smoothing = 0.03
-        currentBeatHz += (targetBeatHz - currentBeatHz) * smoothing
-        currentCarrierCenter += (targetCarrierCenter - currentCarrierCenter) * smoothing
-        currentBodyMix = (currentBodyMix + (targetBodyMix - currentBodyMix) * smoothing).toFloat()
-        currentBrightness = (currentBrightness + (targetBrightness - currentBrightness) * smoothing).toFloat()
-        
-        updateDriftPath()
-    }
-
-    private fun updateDriftPath() {
-        if (profileType == ProfileType.STABLE || profileType == ProfileType.FOCUS_STABLE || driftAmount == 0f) {
-            return
-        }
-        
-        val elapsedSec = (System.currentTimeMillis() - sessionStartTime) / 1000.0
-        val progress = (elapsedSec / sessionDurationSec).coerceIn(0.0, 1.0)
-        
-        val descentAmount = when (profileType) {
-            ProfileType.DESCEND_SOFT -> 1.5
-            ProfileType.DESCEND_ACTIVE -> 5.5
-            ProfileType.GENTLE_AROUND_ANCHOR -> 0.5
-            else -> 0.0
-        }
-        
-        val totalDescent = descentAmount * driftAmount
-        val driftDelta = totalDescent * progress
-        
-        var adjustedBeat = anchorBeat - driftDelta + watchHeartRateAdjustment
-        adjustedBeat = adjustedBeat.coerceIn(0.5, 40.0)
-        
-        targetBeatHz = adjustedBeat
     }
 
     private fun generateAudioBuffer(buffer: FloatArray) {
+        val beat = smoothedBeat.next()
+        val carrier = smoothedCarrier.next()
+        val bodyMix = smoothedBodyMix.next()
+        val oceanMix = smoothedOceanMix.next()
+        val h2Mix = smoothedHarmonic2.next()
+        val h3Mix = smoothedHarmonic3.next()
+        val masterGain = smoothedMasterGain.next()
+        
         for (i in buffer.indices step 2) {
-            val leftFreq = currentCarrierCenter - currentBeatHz / 2.0
-            val rightFreq = currentCarrierCenter + currentBeatHz / 2.0
+            val leftFreq = carrier - beat * 0.5f
+            val rightFreq = carrier + beat * 0.5f
             
-            val leftSample = generateRichTone(leftPhase, currentCarrierCenter, currentBrightness)
-            val rightSample = generateRichTone(rightPhase, currentCarrierCenter, currentBrightness)
+            val leftCore = leftOsc.next(leftFreq, sampleRate.toFloat())
+            val rightCore = rightOsc.next(rightFreq, sampleRate.toFloat())
             
-            leftPhase += leftFreq / sampleRate
-            rightPhase += rightFreq / sampleRate
-            if (leftPhase >= 1.0) leftPhase -= 1.0
-            if (rightPhase >= 1.0) rightPhase -= 1.0
+            val leftH2 = h2LeftOsc.next(leftFreq * 2f, sampleRate.toFloat()) * h2Mix
+            val rightH2 = h2RightOsc.next(rightFreq * 2f, sampleRate.toFloat()) * h2Mix
+            val leftH3 = h3LeftOsc.next(leftFreq * 3f, sampleRate.toFloat()) * h3Mix
+            val rightH3 = h3RightOsc.next(rightFreq * 3f, sampleRate.toFloat()) * h3Mix
             
-            val bodyFreq = currentCarrierCenter * 0.5
-            val bodySample = generateBodyTone(bodyPhase, currentCarrierCenter) * currentBodyMix
-            bodyPhase += bodyFreq / sampleRate
-            if (bodyPhase >= 1.0) bodyPhase -= 1.0
+            val leftMain = (leftCore + leftH2 + leftH3) * 0.26f
+            val rightMain = (rightCore + rightH2 + rightH3) * 0.26f
             
-            val left = (leftSample + bodySample) * currentMasterGain
-            val right = (rightSample + bodySample) * currentMasterGain
+            val bodyFreq = carrier * 0.75f
+            val body = bodyOsc.next(bodyFreq, sampleRate.toFloat()) * bodyMix
+            val bodyL = body * 0.98f
+            val bodyR = body * 1.02f
             
-            buffer[i] = softLimit(left)
-            buffer[i + 1] = softLimit(right)
-        }
-    }
-
-    private fun generateRichTone(phase: Double, carrierFreq: Double, brightness: Float): Float {
-        val fundamental = sin(phase * 2.0 * PI).toFloat()
-        
-        val harmonic2Phase = phase * 2.0
-        val harmonic2 = sin(harmonic2Phase * 2.0 * PI).toFloat() * 0.3f
-        
-        val harmonic3Phase = phase * 3.0
-        val harmonic3 = sin(harmonic3Phase * 2.0 * PI).toFloat() * 0.15f
-        
-        val brightnessMix = brightness * 0.3f
-        return fundamental + harmonic2 * brightnessMix + harmonic3 * brightnessMix
-    }
-
-    private fun generateBodyTone(phase: Double, carrierFreq: Double): Float {
-        val fundamental = sin(phase * 2.0 * PI).toFloat()
-        
-        val subPhase = phase * 0.5
-        val sub = sin(subPhase * 2.0 * PI).toFloat() * 0.4f
-        
-        return fundamental * 0.6f + sub * 0.4f
-    }
-
-    private fun softLimit(sample: Float): Float {
-        return if (sample > 0.8f) {
-            0.8f + (sample - 0.8f) * 0.3f
-        } else if (sample < -0.8f) {
-            -0.8f + (sample + 0.8f) * 0.3f
-        } else {
-            sample
+            var oceanL = 0f
+            var oceanR = 0f
+            if (currentSoundMode == SoundMode.OCEAN) {
+                val (oL, oR) = oceanRenderer.nextFrame(oceanMix)
+                oceanL = oL
+                oceanR = oR
+            }
+            
+            var left = leftMain + bodyL + oceanL
+            var right = rightMain + bodyR + oceanR
+            
+            left = dcBlockL.process(left)
+            right = dcBlockR.process(right)
+            
+            left *= masterGain
+            right *= masterGain
+            
+            left = SoftClipper.process(left)
+            right = SoftClipper.process(right)
+            
+            buffer[i] = left
+            buffer[i + 1] = right
         }
     }
 
     override fun pause() {
-        isFadingOut = true
-        fadeStartTime = System.currentTimeMillis()
-        targetMasterGain = currentMasterGain
-        state = EngineState.PAUSED
+        smoothedMasterGain.setTarget(0f)
+        state = EngineState.PAUSING
     }
 
     override fun resume() {
-        targetMasterGain = 0.8f
-        isFadingIn = true
-        fadeStartTime = System.currentTimeMillis()
-        state = EngineState.PLAYING
+        smoothedMasterGain.setTarget(masterGainTarget)
+        state = EngineState.RUNNING
     }
 
     override fun stop() {
-        isFadingOut = true
-        fadeStartTime = System.currentTimeMillis()
-        targetMasterGain = currentMasterGain
+        smoothedMasterGain.setTarget(0f)
         state = EngineState.STOPPING
+        
+        scope.launch {
+            delay(2000)
+            audioTrack?.stop()
+            audioTrack?.release()
+            audioTrack = null
+            state = EngineState.STOPPED
+            renderLoopActive = false
+        }
     }
 
     override fun release() {
@@ -265,66 +224,37 @@ class RealTimeAudioEngine : AudioEngineController {
         state = EngineState.IDLE
     }
 
-    override fun updateTargets(targets: AudioTargets) {
-        lastTargets = targets
-        targetBeatHz = targets.beatHz
-        targetCarrierCenter = targets.carrierCenterHz
-        targetBodyMix = targets.bodyMix
-        targetBrightness = targets.brightness
-        
-        if (state == EngineState.IDLE || state == EngineState.PREPARED) {
-            currentBeatHz = targets.beatHz
-            currentCarrierCenter = targets.carrierCenterHz
-            currentBodyMix = targets.bodyMix
-            currentBrightness = targets.brightness
-        }
+    override fun updateTargets(targets: com.resonz.app.model.AudioTargets) {
+        smoothedBeat.setTarget(targets.beatHz.toFloat())
+        smoothedCarrier.setTarget(targets.carrierCenterHz.toFloat())
+        smoothedBodyMix.setTarget(targets.bodyMix)
     }
 
     override fun currentEngineState(): EngineState = state
 
-    fun updateWatchHeartRate(bpm: Float) {
-        val baselineBpm = 65f
-        val delta = bpm - baselineBpm
-        
-        val adjustment = when {
-            delta > 4 -> -0.3
-            delta < -3 -> 0.2
-            else -> 0.0
-        }
-        watchHeartRateAdjustment = adjustment.coerceIn(-0.5, 0.5)
+    fun setSoundMode(mode: SoundMode) {
+        currentSoundMode = mode
     }
 
-    private fun toneToCarrier(tone: Float): Double = when {
-        tone < 0.33 -> 140.0 + tone * 120.0
-        tone < 0.66 -> 180.0 + (tone - 0.33) * 180.0
-        else -> 240.0 + (tone - 0.66) * 120.0
+    private fun timeToSeconds(timePreset: TimePreset): Int = when (timePreset) {
+        TimePreset.MIN_20 -> 1200
+        TimePreset.MIN_30 -> 1800
+        TimePreset.MIN_45 -> 2700
+        TimePreset.MIN_90 -> 5400
+        TimePreset.ALL_NIGHT -> 28800
     }
 
-    private fun toneToBodyMix(tone: Float): Float = when {
-        tone < 0.33f -> 0.25f - tone * 0.15f
-        tone < 0.66f -> 0.20f
-        else -> 0.15f - (tone - 0.66f) * 0.3f
-    }.coerceIn(0.05f, 0.30f)
-
-    private fun timeToSeconds(timePreset: com.resonz.app.model.TimePreset): Int = when (timePreset) {
-        com.resonz.app.model.TimePreset.MIN_20 -> 1200
-        com.resonz.app.model.TimePreset.MIN_30 -> 1800
-        com.resonz.app.model.TimePreset.MIN_45 -> 2700
-        com.resonz.app.model.TimePreset.MIN_90 -> 5400
-        com.resonz.app.model.TimePreset.ALL_NIGHT -> 28800
+    private fun driftLevelToAmount(level: DriftLevel): Float = when (level) {
+        DriftLevel.OFF -> 0f
+        DriftLevel.LOW -> 0.33f
+        DriftLevel.MEDIUM -> 0.66f
+        DriftLevel.HIGH -> 1f
     }
 
-    private fun driftLevelToAmount(level: com.resonz.app.model.DriftLevel): Float = when (level) {
-        com.resonz.app.model.DriftLevel.OFF -> 0f
-        com.resonz.app.model.DriftLevel.LOW -> 0.33f
-        com.resonz.app.model.DriftLevel.MEDIUM -> 0.66f
-        com.resonz.app.model.DriftLevel.HIGH -> 1f
-    }
-
-    private fun getProfileType(presetId: com.resonz.app.model.PresetId): ProfileType = when (presetId) {
-        com.resonz.app.model.PresetId.DEEP_SLEEP -> ProfileType.DESCEND_SOFT
-        com.resonz.app.model.PresetId.DRIFT_TO_SLEEP -> ProfileType.DESCEND_ACTIVE
-        com.resonz.app.model.PresetId.FOCUS -> ProfileType.FOCUS_STABLE
-        com.resonz.app.model.PresetId.EARTH_SYNC -> ProfileType.GENTLE_AROUND_ANCHOR
+    private fun getProfileType(presetId: PresetId): ProfileType = when (presetId) {
+        PresetId.DEEP_SLEEP -> ProfileType.DESCEND_SOFT
+        PresetId.DRIFT_TO_SLEEP -> ProfileType.DESCEND_ACTIVE
+        PresetId.FOCUS -> ProfileType.FOCUS_STABLE
+        PresetId.EARTH_SYNC -> ProfileType.GENTLE_AROUND_ANCHOR
     }
 }

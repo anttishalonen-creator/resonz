@@ -1,3 +1,3 @@
 package com.resonz.app.audio
 
-enum class EngineState { IDLE, PREPARED, PLAYING, PAUSED, STOPPING, STOPPED, ERROR }
+enum class EngineState { IDLE, STARTING, RUNNING, PAUSING, PAUSED, STOPPING, STOPPED, PREPARED, ERROR }

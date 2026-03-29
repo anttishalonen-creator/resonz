@@ -1,0 +1,744 @@
+Alright. Here’s the version I’d actually build from your codebase, without fluff.
+
+## First: what to do and what to drop
+
+Do these now:
+
+* keep `AudioTrack`
+* rewrite the synth
+* make one shared session/engine owner
+* add **Pure / Ocean** audio mode
+* fix pause/stop/start properly
+* lower complexity elsewhere
+
+Drop for now:
+
+* smartwatch logic
+* reverb rabbit hole
+* “clever” adaptive AI audio
+* 40 Hz focus as default
+
+The current code is trying to do too many half-finished things at once.
+
+---
+
+# 1. Fix the architecture first
+
+Your current biggest structural mistake is this:
+
+* `MainViewModel` owns one `RealTimeAudioEngine`
+* `PlaybackViewModel` expects another path into playback
+* `PlaybackScreen` is not reading the real engine/session state
+
+That guarantees weird UI.
+
+## Replace that with one shared owner
+
+Create:
+
+`app/src/main/java/com/resonz/app/session/SessionCoordinator.kt`
+
+This should be the **single source of truth** for:
+
+* selected config
+* current transport state
+* elapsed time
+* total time
+* current beat shown in UI
+* audio mode (`PURE`, `OCEAN`)
+* the actual `RealTimeAudioEngine`
+
+### Session state model
+
+Create:
+
+`app/src/main/java/com/resonz/app/session/SessionUiState.kt`
+
+Use something like:
+
+```kotlin
+package com.resonz.app.session
+
+import com.resonz.app.model.SessionConfig
+
+enum class TransportState {
+    IDLE, STARTING, PLAYING, PAUSING, PAUSED, STOPPING
+}
+
+enum class SoundMode {
+    PURE, OCEAN
+}
+
+data class SessionUiState(
+    val config: SessionConfig,
+    val transportState: TransportState = TransportState.IDLE,
+    val elapsedSec: Int = 0,
+    val totalSec: Int = 0,
+    val displayedBeatHz: Double = 3.0,
+    val soundMode: SoundMode = SoundMode.OCEAN,
+    val isModified: Boolean = false
+)
+```
+
+## `SessionCoordinator` responsibilities
+
+It should own:
+
+* one `RealTimeAudioEngine`
+* one timer job
+* one `MutableStateFlow<SessionUiState>`
+
+And expose methods:
+
+* `selectPreset(...)`
+* `updateConfig(...)`
+* `setSoundMode(...)`
+* `start()`
+* `pause()`
+* `resume()`
+* `stop()`
+
+Then:
+
+* `MainViewModel` becomes a thin wrapper around coordinator
+* `PlaybackViewModel` becomes a thin wrapper around coordinator
+
+No more separate engine confusion.
+
+---
+
+# 2. Rewrite the audio engine properly
+
+Your current `RealTimeAudioEngine` should stay as the main file name, but the inside should be rebuilt.
+
+## Keep
+
+* `sampleRate = 48000`
+* stereo float output
+* `AudioTrack.MODE_STREAM`
+
+## Change
+
+* do not stop the render loop just because state changes
+* do not kill playback on pause
+* do not do harmonic-heavy “rich tone” by default
+* do not use strong body tone for sleep presets
+
+---
+
+# 3. New audio files to add
+
+Create these in `app/src/main/java/com/resonz/app/audio/`
+
+## `SmoothedValue.kt`
+
+One-pole smoother for beat, carrier, gains, etc.
+
+```kotlin
+package com.resonz.app.audio
+
+class SmoothedValue(
+    initial: Float,
+    private val smoothingCoeff: Float
+) {
+    var current: Float = initial
+        private set
+    var target: Float = initial
+
+    fun setTarget(value: Float) {
+        target = value
+    }
+
+    fun reset(value: Float) {
+        current = value
+        target = value
+    }
+
+    fun next(): Float {
+        current += (target - current) * smoothingCoeff
+        return current
+    }
+}
+```
+
+Use different smoothers for:
+
+* beat
+* carrier
+* body mix
+* ocean mix
+* master gain
+
+## `BrownNoiseGenerator.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+import kotlin.random.Random
+
+class BrownNoiseGenerator(seed: Int) {
+    private val random = Random(seed)
+    private var state = 0f
+
+    fun next(): Float {
+        val white = random.nextFloat() * 2f - 1f
+        state = (state + 0.02f * white).coerceIn(-1f, 1f)
+        return state * 3.5f
+    }
+}
+```
+
+## `OnePoleLowPass.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+import kotlin.math.PI
+import kotlin.math.exp
+
+class OnePoleLowPass(sampleRate: Float, cutoffHz: Float) {
+    private var a = 0f
+    private var z = 0f
+
+    init { setCutoff(sampleRate, cutoffHz) }
+
+    fun setCutoff(sampleRate: Float, cutoffHz: Float) {
+        a = (1f - exp((-2.0 * PI * cutoffHz / sampleRate).toFloat()))
+    }
+
+    fun process(x: Float): Float {
+        z += a * (x - z)
+        return z
+    }
+}
+```
+
+## `OnePoleHighPass.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+class OnePoleHighPass {
+    private var prevX = 0f
+    private var prevY = 0f
+    private var alpha = 0.995f
+
+    fun setAlpha(value: Float) {
+        alpha = value
+    }
+
+    fun process(x: Float): Float {
+        val y = alpha * (prevY + x - prevX)
+        prevX = x
+        prevY = y
+        return y
+    }
+}
+```
+
+## `DcBlocker.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+class DcBlocker {
+    private var prevX = 0f
+    private var prevY = 0f
+    private val r = 0.995f
+
+    fun process(x: Float): Float {
+        val y = x - prevX + r * prevY
+        prevX = x
+        prevY = y
+        return y
+    }
+}
+```
+
+## `BiquadBandPass.kt`
+
+Use a simple RBJ biquad band-pass. This is the only mathy one, but worth it. Don’t skip it.
+
+Fields:
+
+* coefficients
+* per-channel delay states
+* `setBandPass(sampleRate, centerHz, q)`
+
+This gives the ocean layer its character.
+
+## `SoftClipper.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+import kotlin.math.tanh
+
+object SoftClipper {
+    fun process(x: Float): Float {
+        val y = tanh(1.15f * x)
+        val norm = tanh(1.15f)
+        return (y / norm).coerceIn(-0.95f, 0.95f)
+    }
+
+    private fun tanh(x: Float): Float = tanh(x.toDouble()).toFloat()
+}
+```
+
+## `SineOscillator.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+import kotlin.math.PI
+import kotlin.math.sin
+
+class SineOscillator {
+    private var phase = 0.0
+
+    fun next(freqHz: Float, sampleRate: Float): Float {
+        val out = sin(phase * 2.0 * PI).toFloat()
+        phase += freqHz / sampleRate
+        if (phase >= 1.0) phase -= 1.0
+        return out
+    }
+}
+```
+
+## `OceanLayerRenderer.kt`
+
+This should own:
+
+* left/right brown generators
+* left/right HPF
+* left/right LPF
+* 2 band-pass filters per side
+* slow LFO phases for filter drift
+* slow swell phase
+
+Public method:
+
+* `nextFrame(oceanMix: Float): Pair<Float, Float>`
+
+This is the file that makes the sound nicer.
+
+---
+
+# 4. Add preset voicing
+
+Create:
+
+`app/src/main/java/com/resonz/app/audio/PresetAudioProfile.kt`
+
+```kotlin
+package com.resonz.app.audio
+
+import com.resonz.app.model.PresetId
+
+data class PresetAudioProfile(
+    val carrierHz: Float,
+    val beatHz: Float,
+    val bodyMix: Float,
+    val oceanMix: Float,
+    val harmonic2Mix: Float,
+    val harmonic3Mix: Float
+)
+
+object PresetAudioProfiles {
+    fun fromPreset(id: PresetId): PresetAudioProfile = when (id) {
+        PresetId.DEEP_SLEEP -> PresetAudioProfile(
+            carrierHz = 170f,
+            beatHz = 3.0f,
+            bodyMix = 0.00f,
+            oceanMix = 0.045f,
+            harmonic2Mix = 0f,
+            harmonic3Mix = 0f
+        )
+        PresetId.DRIFT_TO_SLEEP -> PresetAudioProfile(
+            carrierHz = 185f,
+            beatHz = 8.0f,
+            bodyMix = 0.015f,
+            oceanMix = 0.05f,
+            harmonic2Mix = 0f,
+            harmonic3Mix = 0f
+        )
+        PresetId.EARTH_SYNC -> PresetAudioProfile(
+            carrierHz = 170f,
+            beatHz = 7.83f,
+            bodyMix = 0.00f,
+            oceanMix = 0.04f,
+            harmonic2Mix = 0f,
+            harmonic3Mix = 0f
+        )
+        PresetId.FOCUS -> PresetAudioProfile(
+            carrierHz = 230f,
+            beatHz = 14f,
+            bodyMix = 0.03f,
+            oceanMix = 0.02f,
+            harmonic2Mix = 0.04f,
+            harmonic3Mix = 0.015f
+        )
+    }
+}
+```
+
+## Important
+
+Change Focus default from `40 Hz` to `14 Hz`.
+
+Keep 40 only in advanced tuning if you want it later.
+
+---
+
+# 5. Rebuild `RealTimeAudioEngine.kt`
+
+## New responsibilities
+
+`RealTimeAudioEngine` should do only this:
+
+* own AudioTrack
+* own oscillators/noise/filter render objects
+* own smoothed runtime parameters
+* stream audio continuously while active
+* expose transport methods
+
+## Internal state
+
+Replace your current state mess with:
+
+```kotlin
+enum class EngineState {
+    IDLE, STARTING, RUNNING, PAUSING, PAUSED, STOPPING, STOPPED
+}
+```
+
+## Important transport rule
+
+The render loop must continue while:
+
+* starting fade-in
+* pausing fade-out
+* paused at zero gain
+* stopping fade-out
+
+Do **not** use:
+
+```kotlin
+while (isActive && state == EngineState.PLAYING)
+```
+
+Use something like:
+
+```kotlin
+while (isActive && state != EngineState.STOPPED && state != EngineState.IDLE)
+```
+
+Or better, keep a separate boolean `renderLoopActive`.
+
+## Gain behavior
+
+Use a smoothed master gain:
+
+* fade in to `0.26f`
+* fade out to `0f`
+
+When paused:
+
+* keep track alive
+* keep rendering silence or near-silence
+* do not release track
+
+When stopped:
+
+* fade to zero
+* then stop/release track
+* then set state to `STOPPED`
+
+---
+
+# 6. Core render formula
+
+This is the actual sound recipe.
+
+For every stereo frame:
+
+## A. Binaural core
+
+```kotlin
+val leftFreq = carrier - beat * 0.5f
+val rightFreq = carrier + beat * 0.5f
+```
+
+Then:
+
+```kotlin
+val leftCore = leftOsc.next(leftFreq, sampleRate)
+val rightCore = rightOsc.next(rightFreq, sampleRate)
+```
+
+For Focus only, add tiny harmonics:
+
+```kotlin
+val leftH2 = leftH2Osc.next(leftFreq * 2f, sampleRate) * harmonic2Mix
+val rightH2 = rightH2Osc.next(rightFreq * 2f, sampleRate) * harmonic2Mix
+val leftH3 = leftH3Osc.next(leftFreq * 3f, sampleRate) * harmonic3Mix
+val rightH3 = rightH3Osc.next(rightFreq * 3f, sampleRate) * harmonic3Mix
+```
+
+Then:
+
+```kotlin
+val leftMain = (leftCore + leftH2 + leftH3) * 0.26f
+val rightMain = (rightCore + rightH2 + rightH3) * 0.26f
+```
+
+## B. Body layer
+
+Use a separate oscillator:
+
+```kotlin
+val bodyFreq = carrier * 0.75f
+val body = bodyOsc.next(bodyFreq, sampleRate) * bodyMix
+```
+
+Then spread it slightly:
+
+```kotlin
+val bodyL = body * 0.98f
+val bodyR = body * 1.02f
+```
+
+## C. Ocean layer
+
+From `OceanLayerRenderer`:
+
+```kotlin
+val (oceanL, oceanR) = oceanRenderer.nextFrame(oceanMix)
+```
+
+## D. Final mix
+
+```kotlin
+var left = leftMain + bodyL + oceanL
+var right = rightMain + bodyR + oceanR
+
+left = dcBlockL.process(left)
+right = dcBlockR.process(right)
+
+left *= masterGain
+right *= masterGain
+
+left = SoftClipper.process(left)
+right = SoftClipper.process(right)
+```
+
+Then write to buffer.
+
+---
+
+# 7. Ocean layer settings
+
+Build the ocean with **filtered brown noise**, not WAV files.
+
+## Suggested settings
+
+* HPF: around `25–30 Hz`
+* LPF: around `1400–1600 Hz`
+* band-pass 1 center: `360 Hz`
+* band-pass 2 center: `850 Hz`
+* Q around `0.7–1.0`
+
+## Modulation
+
+Use very slow LFOs:
+
+* `0.035 Hz`
+* `0.07 Hz`
+* `0.05 Hz` swell
+
+Keep modulation subtle:
+
+* ±12–15%
+
+## Mix amount
+
+* Deep Sleep: `0.045`
+* Drift to Sleep: `0.05`
+* Earth Sync: `0.04`
+* Focus: `0.02`
+
+That is enough. Don’t overcook it.
+
+---
+
+# 8. Rewrite `MainViewModel.kt`
+
+Right now it does too much.
+
+New version:
+
+* no engine ownership
+* no direct transport logic
+* no local timer logic
+* no “audio engine prep” here
+
+It should call `SessionCoordinator`.
+
+Methods:
+
+* `selectPreset`
+* `setBeat`
+* `setTone`
+* `setDrift`
+* `setTime`
+* `setSoundMode`
+* `startOrPause`
+* `stop`
+
+That’s it.
+
+---
+
+# 9. Rewrite `PlaybackViewModel.kt`
+
+Also make it thin.
+
+It should not own:
+
+* a separate engine
+* separate elapsed timer truth
+* separate playing truth
+
+It should only observe `SessionCoordinator.uiState`.
+
+So the file becomes tiny.
+
+---
+
+# 10. Fix `MainScreen.kt`
+
+Right now it always shows only one big `START SESSION` button.
+
+That part is too dumb for the real states.
+
+## Replace it with state-aware controls
+
+If session is `IDLE`:
+
+* big button says `START SESSION`
+
+If `PLAYING`:
+
+* big button says `PAUSE`
+* secondary small button says `STOP`
+
+If `PAUSED`:
+
+* big button says `RESUME`
+* secondary small button says `STOP`
+
+And navigating to Playback should not be what starts the engine logic.
+Start audio first. Navigation is just navigation.
+
+Also add a small sound mode toggle:
+
+* `PURE`
+* `OCEAN`
+
+Put it under tone or near the main action.
+
+---
+
+# 11. Fix `PlaybackScreen.kt`
+
+This screen should reflect the shared session state only.
+
+Show:
+
+* preset name
+* current beat
+* elapsed / total
+* state
+* large pause/resume button
+* visible stop button
+
+No local fake state.
+
+---
+
+# 12. Order of attack
+
+This is the order I’d do it in.
+
+## Pass 1 — structural repair
+
+1. add `session/SessionUiState.kt`
+2. add `session/SessionCoordinator.kt`
+3. rewrite `MainViewModel.kt`
+4. rewrite `PlaybackViewModel.kt`
+5. wire both screens to shared state
+
+## Pass 2 — audio repair
+
+6. add `SmoothedValue.kt`
+7. add `SineOscillator.kt`
+8. add `BrownNoiseGenerator.kt`
+9. add `OnePoleLowPass.kt`
+10. add `OnePoleHighPass.kt`
+11. add `DcBlocker.kt`
+12. add `BiquadBandPass.kt`
+13. add `SoftClipper.kt`
+14. add `OceanLayerRenderer.kt`
+15. add `PresetAudioProfile.kt`
+16. rewrite `RealTimeAudioEngine.kt`
+
+## Pass 3 — UI cleanup
+
+17. add `Pure / Ocean` toggle
+18. fix playback button logic
+19. fix stop button visibility
+20. reduce text/status clutter
+
+---
+
+# 13. What not to do
+
+Tell the agent very clearly:
+
+Do **not**:
+
+* add MP3/WAV ocean loops
+* add heavy reverb to binaural core
+* make the sleep tones “richer” with more harmonics
+* keep separate playback state in two viewmodels
+* keep 40 Hz as default focus tone
+* release `AudioTrack` on pause
+
+That is exactly how you get a cheap or broken-feeling app.
+
+---
+
+# 14. My blunt recommendation on sound character
+
+For this product, the premium feeling comes from:
+
+* **clean sine core**
+* **slow fades**
+* **subtle ocean bed**
+* **no buzzy harmonics**
+* **stable transport**
+
+Not from fancy audio libraries.
+
+The current code sounds mediocre because it is basically a raw oscillator with some slapped-on harmonics and mud in the middle. That is fixable.
+
+---
+
+# 15. The one instruction I’d hand the coder
+
+Paste this:
+
+> Rebuild the app around one shared SessionCoordinator that owns the audio engine and exposes a single SessionUiState flow to both Main and Playback screens. Rewrite the audio engine as a 3-layer renderer: pure binaural sine core, optional very quiet body layer at 0.75 * carrier, and procedural ocean layer from filtered brown noise. Sleep presets must use zero harmonics. Focus defaults to 14 Hz, not 40 Hz. Pause must fade to zero without releasing AudioTrack; stop must fade out then release. Add a simple Pure/Ocean mode toggle in the UI.
+
+Next step should be the actual Kotlin code for `SessionCoordinator.kt` and the rewritten `RealTimeAudioEngine.kt`.
+
